@@ -77,6 +77,8 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
             EncryptionUtils.verifyClientData(clientJwt, identityPublicKey);
             skinData = new JSONObject(JsonUtil.parseJson(jws.getUnverifiedPayload()));
 
+            logger.info("Player " + chain.identityClaims().extraData.displayName + " (" + session.getSocketAddress() + ") joined the session");
+
             initializeBridgeSession();
         } catch (Exception e) {
             session.disconnect("disconnectionScreen.internalError.cantConnect");
@@ -126,6 +128,8 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
         }
         BridgePlayerSession player = this.session.getPlayer();
         if (player != null) {
+            logger.info("Player " + player.getIdentityData().displayName + " (" + session.getSocketAddress() + ") left the session"
+                + (reason != null && reason.length() > 0 ? " (" + reason + ")" : ""));
             player.closeDownstream(reason);
         }
     }
