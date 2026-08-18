@@ -29,7 +29,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
-    private static final String REQUIRED_JOINABILITY = "joinable_by_friends_of_friends";
+    private static final String REQUIRED_JOINABILITY = "joinable_by_friends";
     private static CoreConfig config;
     private static StandaloneLoggerImpl logger;
     private static SessionInfo sessionInfo;
@@ -281,10 +281,6 @@ public class StandaloneMain {
     }
 
     private static void applySessionSettings(SessionInfo sessionInfo) {
-        if (!REQUIRED_JOINABILITY.equals(config.xboxSession().joinability())) {
-            logger.warn("Only joinable_by_friends_of_friends is supported by the NetherNet publisher; overriding configured joinability '"
-                + config.xboxSession().joinability() + "'.");
-        }
         sessionInfo.setJoinability(REQUIRED_JOINABILITY);
         sessionInfo.setWorldType(config.xboxSession().worldType());
         sessionInfo.setEditorWorld(config.xboxSession().editorWorld());
