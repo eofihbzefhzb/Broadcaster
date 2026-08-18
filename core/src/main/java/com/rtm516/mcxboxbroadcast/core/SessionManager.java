@@ -34,7 +34,9 @@ public class SessionManager extends SessionManagerCore {
     private final Map<String, SubSessionManager> subSessionManagers;
 
     private CoreConfig.FriendSyncConfig friendSyncConfig;
+    private boolean queryFriendsOnStartup = true;
     private Runnable restartCallback;
+    private java.util.function.IntFunction<String> shardNetworkIdResolver = shard -> "";
 
     private Map<String, String> nonces;
 
@@ -72,6 +74,34 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
+     * Set the resolver used to look up the NetherNet network id for a given shard number
+     * (1 = primary, 2+ = sub-sessions). Used to give each sub-session its own NetherNet shard
+     * from the Geyser portal-bridge instead of sharing the primary's shard.
+     *
+     * @param resolver A function from shard number to NetherNet network id, or empty string if unresolved
+     */
+    public void shardNetworkIdResolver(java.util.function.IntFunction<String> resolver) {
+        this.shardNetworkIdResolver = resolver != null ? resolver : (shard -> "");
+    }
+
+    /**
+     * Resolve the NetherNet network id for the given shard number, safely swallowing any
+     * resolver errors.
+     *
+     * @param shardNumber The shard number to resolve
+     * @return The NetherNet network id, or empty string if it couldn't be resolved
+     */
+    public String resolveShardNetworkId(int shardNumber) {
+        try {
+            String resolved = shardNetworkIdResolver.apply(shardNumber);
+            return resolved != null ? resolved : "";
+        } catch (Exception e) {
+            logger.error("Failed to resolve NetherNet shard network id for shard " + shardNumber, e);
+            return "";
+        }
+    }
+
+    /**
      * Initialize the session manager with the given session information
      *
      * @param sessionInfo      The session information to use
@@ -82,6 +112,10 @@ public class SessionManager extends SessionManagerCore {
     public boolean init(SessionInfo sessionInfo, CoreConfig.FriendSyncConfig friendSyncConfig) throws SessionCreationException, SessionUpdateException {
         // Set the internal session information based on the session info
         this.sessionInfo = new ExpandedSessionInfo("", "", sessionInfo);
+        this.queryFriendsOnStartup = friendSyncConfig.autoFollow()
+            || friendSyncConfig.autoUnfollow()
+            || friendSyncConfig.initialInvite()
+            || friendSyncConfig.expiry().enabled();
 
         super.init();
 
@@ -107,9 +141,12 @@ public class SessionManager extends SessionManagerCore {
         List<String> finalSubSessions = subSessions;
         scheduledThreadPool.execute(() -> {
             // Create the sub-session manager for each sub-session
-            for (String subSession : finalSubSessions) {
+            // Shard 1 is reserved for the primary session, so sub-sessions start at shard 2
+            for (int i = 0; i < finalSubSessions.size(); i++) {
+                String subSession = finalSubSessions.get(i);
+                int shardNumber = i + 2;
                 try {
-                    SubSessionManager subSessionManager = new SubSessionManager(subSession, this, storageManager().subSession(subSession), notificationManager(), logger);
+                    SubSessionManager subSessionManager = new SubSessionManager(subSession, shardNumber, this, storageManager().subSession(subSession), notificationManager(), logger);
                     subSessionManager.init();
                     subSessionManager.friendManager().init(this.friendSyncConfig);
                     subSessionManagers.put(subSession, subSessionManager);
@@ -127,6 +164,11 @@ public class SessionManager extends SessionManagerCore {
     protected boolean handleFriendship() {
         // Don't do anything as we are the main session
         return false;
+    }
+
+    @Override
+    protected boolean shouldQueryFriendsOnStartup() {
+        return queryFriendsOnStartup;
     }
 
     /**
@@ -275,8 +317,14 @@ public class SessionManager extends SessionManagerCore {
         }
 
         // Create the sub-session manager
+        // Shard 1 is reserved for the primary session; pick the next unused shard number so
+        // previously-removed sub-sessions' shard numbers are never reused while running
+        int shardNumber = subSessionManagers.values().stream()
+            .mapToInt(SubSessionManager::shardNumber)
+            .max()
+            .orElse(1) + 1;
         try {
-            SubSessionManager subSessionManager = new SubSessionManager(id, this, storageManager().subSession(id), notificationManager(), logger);
+            SubSessionManager subSessionManager = new SubSessionManager(id, shardNumber, this, storageManager().subSession(id), notificationManager(), logger);
             subSessionManager.init();
             subSessionManager.friendManager().init(friendSyncConfig);
             subSessionManagers.put(id, subSessionManager);
@@ -335,6 +383,7 @@ public class SessionManager extends SessionManagerCore {
 
         messages.add("Primary Session:");
         messages.add(" - Gamertag: " + getGamertag());
+        messages.add("   Shard: 1");
         messages.add("   Following: " + socialSummary().targetFollowingCount() + "/" + Constants.MAX_FRIENDS);
 
         if (!subSessionManagers.isEmpty()) {
@@ -342,6 +391,7 @@ public class SessionManager extends SessionManagerCore {
             for (Map.Entry<String, SubSessionManager> subSession : subSessionManagers.entrySet()) {
                 messages.add(" - ID: " + subSession.getKey());
                 messages.add("   Gamertag: " + subSession.getValue().getGamertag());
+                messages.add("   Shard: " + subSession.getValue().shardNumber());
                 messages.add("   Following: " + subSession.getValue().socialSummary().targetFollowingCount() + "/" + Constants.MAX_FRIENDS);
             }
         } else {

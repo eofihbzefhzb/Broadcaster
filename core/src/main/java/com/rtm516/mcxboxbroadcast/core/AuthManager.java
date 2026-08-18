@@ -144,6 +144,8 @@ public class AuthManager {
             authManager.getXboxLiveXstsToken().getUpToDate();
             authManager.getPlayFabToken().getUpToDate();
             profileInfo.getUpToDate();
+            authManager.getMinecraftSession().getUpToDate();
+            saveToCache();
         } catch (InformativeHttpRequestException e) {
             if (e.getMessage().contains("agecheck")) {
                 throw new AgeVerificationException("Authentication failed due to age verification requirement", e);

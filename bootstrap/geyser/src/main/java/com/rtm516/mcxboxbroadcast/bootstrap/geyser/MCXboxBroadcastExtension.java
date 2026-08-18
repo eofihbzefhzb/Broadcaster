@@ -37,6 +37,7 @@ public class MCXboxBroadcastExtension implements Extension {
     SessionManager sessionManager;
     SessionInfo sessionInfo;
     CoreConfig config;
+    boolean broadcastEnabled;
 
     @Subscribe
     public void onCommandDefine(GeyserDefineCommandsEvent event) {
@@ -47,6 +48,10 @@ public class MCXboxBroadcastExtension implements Extension {
             .executor((source, command, args) -> {
                 if (!source.isConsole()) {
                     source.sendMessage("This command can only be ran from the console.");
+                    return;
+                }
+                if (!broadcastEnabled || sessionManager == null) {
+                    source.sendMessage("MCXboxBroadcast is disabled in config.yml.");
                     return;
                 }
 
@@ -63,6 +68,10 @@ public class MCXboxBroadcastExtension implements Extension {
                     source.sendMessage("This command can only be ran from the console.");
                     return;
                 }
+                if (!broadcastEnabled || sessionManager == null) {
+                    source.sendMessage("MCXboxBroadcast is disabled in config.yml.");
+                    return;
+                }
 
                 logger.info("Dumping session responses to 'lastSessionResponse.json' and 'currentSessionResponse.json'");
 
@@ -77,6 +86,10 @@ public class MCXboxBroadcastExtension implements Extension {
             .executor((source, command, args) -> {
                 if (!source.isConsole()) {
                     source.sendMessage("This command can only be ran from the console.");
+                    return;
+                }
+                if (!broadcastEnabled || sessionManager == null) {
+                    source.sendMessage("MCXboxBroadcast is disabled in config.yml.");
                     return;
                 }
 
@@ -116,6 +129,11 @@ public class MCXboxBroadcastExtension implements Extension {
     }
 
     private void restart() {
+        if (!broadcastEnabled || sessionManager == null) {
+            logger.info("MCXboxBroadcast is disabled in config.yml");
+            return;
+        }
+
         sessionManager.shutdown();
 
         // Create a new session manager, but reuse the notification manager as config hasn't been reloaded
@@ -149,6 +167,12 @@ public class MCXboxBroadcastExtension implements Extension {
         } catch (IOException e) {
             logger.error("Failed to load config, extension will not start!", e);
             this.disable();
+            return;
+        }
+
+        broadcastEnabled = config.enabled();
+        if (!broadcastEnabled) {
+            logger.info("MCXboxBroadcast is installed but disabled in config.yml. Set enabled: true to start broadcasting.");
             return;
         }
 
@@ -189,20 +213,14 @@ public class MCXboxBroadcastExtension implements Extension {
                 port = Integer.parseInt(config.session().remotePort());
             }
 
-            // Create the session information based on the Geyser config
-            sessionInfo = new SessionInfo();
-            sessionInfo.setHostName(this.geyserApi().bedrockListener().secondaryMotd());
-            sessionInfo.setWorldName(this.geyserApi().bedrockListener().primaryMotd());
-            sessionInfo.setPlayers(this.geyserApi().onlineConnections().size());
-            sessionInfo.setMaxPlayers(GeyserImpl.getInstance().config().motd().maxPlayers()); // TODO Find API equivalent
-
-            // Fallback to the gamertag if the host name is empty
-            if (sessionInfo.getHostName().isEmpty()) {
-                sessionInfo.setHostName(sessionManager.getGamertag());
-            }
-
-            sessionInfo.setIp(ip);
-            sessionInfo.setPort(port);
+            sessionInfo = buildSessionInfo(
+                this.geyserApi().bedrockListener().secondaryMotd(),
+                this.geyserApi().bedrockListener().primaryMotd(),
+                this.geyserApi().onlineConnections().size(),
+                GeyserImpl.getInstance().config().motd().maxPlayers(),
+                ip,
+                port
+            );
 
             createSession();
         });
@@ -210,32 +228,65 @@ public class MCXboxBroadcastExtension implements Extension {
 
     @Subscribe
     public void onShutdown(GeyserShutdownEvent event) {
-        sessionManager.shutdown();
+        if (sessionManager != null) {
+            sessionManager.shutdown();
+        }
     }
 
     @Subscribe
     public void onBedrockPing(GeyserBedrockPingEvent event) {
-        if (sessionInfo == null) {
+        if (sessionInfo == null || !config.session().syncFromGeyser()) {
             return;
         }
 
-        // Fallback to the gamertag if the host name is empty
-        String hostName = event.secondaryMotd();
-        if (hostName == null || hostName.isEmpty()) {
+        SessionInfo updated = buildSessionInfo(
+            event.secondaryMotd(),
+            event.primaryMotd(),
+            event.playerCount(),
+            event.maxPlayerCount(),
+            sessionInfo.getIp(),
+            sessionInfo.getPort()
+        );
+
+        sessionInfo.setHostName(updated.getHostName());
+        sessionInfo.setWorldName(updated.getWorldName());
+        sessionInfo.setPlayers(updated.getPlayers());
+        sessionInfo.setMaxPlayers(updated.getMaxPlayers());
+        sessionInfo.setJoinability(updated.getJoinability());
+        sessionInfo.setWorldType(updated.getWorldType());
+        sessionInfo.setEditorWorld(updated.isEditorWorld());
+        sessionInfo.setHardcore(updated.isHardcore());
+    }
+
+    private SessionInfo buildSessionInfo(String liveHostName, String liveWorldName, int livePlayers, int liveMaxPlayers, String ip, int port) {
+        SessionInfo info = new SessionInfo();
+
+        String hostName = config.session().sessionInfo().hostName().isBlank() ? liveHostName : config.session().sessionInfo().hostName();
+        if (hostName == null || hostName.isBlank()) {
             hostName = sessionManager.getGamertag();
         }
 
-        // Allows support for motd and player count passthrough
-        sessionInfo.setHostName(hostName);
-        sessionInfo.setWorldName(event.primaryMotd());
-        
-        sessionInfo.setPlayers(event.playerCount());
-        sessionInfo.setMaxPlayers(event.maxPlayerCount());
-
-        // Fallback to the gamertag if the host name is empty
-        if (sessionInfo.getHostName().isEmpty()) {
-            sessionInfo.setHostName(sessionManager.getGamertag());
+        String worldName = config.session().sessionInfo().worldName().isBlank() ? liveWorldName : config.session().sessionInfo().worldName();
+        if (worldName == null || worldName.isBlank()) {
+            worldName = hostName;
         }
+
+        int players = config.session().sessionInfo().players() > 0 ? config.session().sessionInfo().players() : livePlayers;
+        int maxPlayers = config.session().sessionInfo().maxPlayers() > 0 ? config.session().sessionInfo().maxPlayers() : liveMaxPlayers;
+
+        info.setHostName(hostName);
+        info.setWorldName(worldName);
+        info.setPlayers(players);
+        info.setMaxPlayers(maxPlayers);
+        info.setIp(ip);
+        info.setPort(port);
+        info.setJoinability(config.xboxSession().joinability());
+        info.setWorldType(config.xboxSession().worldType());
+        info.setEditorWorld(config.xboxSession().editorWorld());
+        info.setHardcore(config.xboxSession().hardcore());
+        info.setExternalNetherNetHosted(config.netherNet().externalHosted() && !config.netherNet().externalNetworkId().isBlank());
+        info.setExternalNetherNetId(config.netherNet().externalNetworkId());
+        return info;
     }
 
 

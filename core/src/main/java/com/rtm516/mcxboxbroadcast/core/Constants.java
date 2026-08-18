@@ -49,12 +49,12 @@ public class Constants {
     public static final int MAX_FRIENDS = 2000;
 
     /**
-     * Used for the micro nethernet server that transfers the client to the real server
+     * Used for the NetherNet gameplay ingress/bridge path
      */
     public static final BedrockCodec BEDROCK_CODEC = Bedrock_v2168.CODEC;
 
     /**
      * Config version for upgrade purposes
      */
-    public static final int CONFIG_VERSION = 2;
+    public static final int CONFIG_VERSION = 7;
 }

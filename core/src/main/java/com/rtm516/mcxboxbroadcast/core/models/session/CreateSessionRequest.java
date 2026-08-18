@@ -13,7 +13,7 @@ public class CreateSessionRequest extends JoinSessionRequest {
         this.properties = new SessionProperties(new SessionSystemProperties(), new SessionCustomProperties(
             3,
             false,
-            "joinable_by_friends",
+            sessionInfo.getJoinability(),
             false,
             sessionInfo.getMaxPlayers(),
             sessionInfo.getPlayers(),
@@ -26,11 +26,11 @@ public class CreateSessionRequest extends JoinSessionRequest {
             sessionInfo.getXuid(),
             "",
             sessionInfo.getWorldName(),
-            "Survival",
+            sessionInfo.getWorldType(),
             sessionInfo.getProtocol(),
             sessionInfo.getVersion(),
-            false,
-            false,
+            sessionInfo.isEditorWorld(),
+            sessionInfo.isHardcore(),
             nonces
         ));
     }

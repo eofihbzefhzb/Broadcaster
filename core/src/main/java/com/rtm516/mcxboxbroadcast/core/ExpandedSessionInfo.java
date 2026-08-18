@@ -23,7 +23,9 @@ public class ExpandedSessionInfo extends SessionInfo {
         this.rakNetGUID = "";
 
         this.sessionId = UUID.randomUUID().toString();
-        this.netherNetId = BigInteger.valueOf(Math.abs(RANDOM.nextLong()));
+        this.netherNetId = sessionInfo.isExternalNetherNetHosted() && sessionInfo.getExternalNetherNetId() != null && !sessionInfo.getExternalNetherNetId().isBlank()
+            ? new BigInteger(sessionInfo.getExternalNetherNetId())
+            : BigInteger.valueOf(Math.abs(RANDOM.nextLong()));
         this.deviceId = UUID.randomUUID().toString();
         this.pmsgId = null;
 
@@ -33,6 +35,20 @@ public class ExpandedSessionInfo extends SessionInfo {
         setMaxPlayers(sessionInfo.getMaxPlayers());
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
+        setJoinability(sessionInfo.getJoinability());
+        setWorldType(sessionInfo.getWorldType());
+        setEditorWorld(sessionInfo.isEditorWorld());
+        setHardcore(sessionInfo.isHardcore());
+        setProxyBridgeEnabled(sessionInfo.isProxyBridgeEnabled());
+        setRelayTargetAddress(sessionInfo.getRelayTargetAddress());
+        setRelayTargetPort(sessionInfo.getRelayTargetPort());
+        setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
+        setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
+        if (sessionInfo.isExternalNetherNetHosted()
+            && sessionInfo.getExternalNetherNetId() != null
+            && !sessionInfo.getExternalNetherNetId().isBlank()) {
+            this.netherNetId = new BigInteger(sessionInfo.getExternalNetherNetId());
+        }
     }
 
     public void updateSessionInfo(SessionInfo sessionInfo) {
@@ -42,6 +58,15 @@ public class ExpandedSessionInfo extends SessionInfo {
         setMaxPlayers(sessionInfo.getMaxPlayers());
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
+        setJoinability(sessionInfo.getJoinability());
+        setWorldType(sessionInfo.getWorldType());
+        setEditorWorld(sessionInfo.isEditorWorld());
+        setHardcore(sessionInfo.isHardcore());
+        setProxyBridgeEnabled(sessionInfo.isProxyBridgeEnabled());
+        setRelayTargetAddress(sessionInfo.getRelayTargetAddress());
+        setRelayTargetPort(sessionInfo.getRelayTargetPort());
+        setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
+        setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
     }
 
     public String getConnectionId() {

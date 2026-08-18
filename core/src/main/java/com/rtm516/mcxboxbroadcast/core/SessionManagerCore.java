@@ -13,16 +13,23 @@ import com.rtm516.mcxboxbroadcast.core.models.session.SocialSummaryResponse;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
 import com.rtm516.mcxboxbroadcast.core.nethernet.BroadcasterChannelInitializer;
+import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.BridgeClientSession;
 import dev.kastle.netty.channel.nethernet.NetherNetChannelFactory;
 import dev.kastle.netty.channel.nethernet.config.NetherChannelOption;
 import dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling;
 import dev.kastle.webrtc.PeerConnectionFactory;
+import io.netty.bootstrap.Bootstrap;
 import dev.kastle.webrtc.PortAllocatorConfig;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import net.raphimc.minecraftauth.bedrock.BedrockAuthManager;
+import org.cloudburstmc.netty.channel.raknet.RakChannelFactory;
+import org.cloudburstmc.netty.channel.raknet.config.RakChannelOption;
+import org.cloudburstmc.protocol.bedrock.BedrockPeer;
+import org.cloudburstmc.protocol.bedrock.netty.initializer.BedrockChannelInitializer;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,10 +39,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Simple manager to authenticate and create sessions on Xbox
@@ -56,10 +67,16 @@ public abstract class SessionManagerCore {
 
     protected boolean initialized = false;
 
+    private volatile Instant lastSuccessfulSessionUpdate;
+    private volatile String lastSessionError = "none";
+    private volatile int consecutiveSessionFailures;
+    private volatile boolean sessionHealthy = true;
+
     private Channel netherNetChannel;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private NetherNetXboxRpcSignaling signaling;
+    private final Set<Channel> bridgeClientChannels = ConcurrentHashMap.newKeySet();
 
     private PortAllocatorConfig netherNetPortAllocatorConfig;
 
@@ -148,6 +165,16 @@ public abstract class SessionManagerCore {
     }
 
     /**
+     * Ensure the Xbox authentication cache is loaded and its refreshable
+     * tokens are current. This is intentionally separate from session
+     * creation so external-hosted NetherNet mode can refresh authentication
+     * before Geyser attempts to bind its signaling channel.
+     */
+    public void ensureAuthenticated() {
+        getAuthManager();
+    }
+
+    /**
      * Initialize the session manager with the given session information
      *
      * @throws SessionCreationException If the session failed to create either because it already exists or some other reason
@@ -171,11 +198,20 @@ public abstract class SessionManagerCore {
         }
 
         int friendCount = -1;
-        try {
-            friendCount = friendManager.get().size();
-        } catch (Exception ignored) {}
+        if (shouldQueryFriendsOnStartup()) {
+            try {
+                friendCount = friendManager.get().size();
+            } catch (Exception ignored) {
+                logger.debug("Unable to query the Xbox friends list during startup; continuing with session publishing.");
+            }
+        } else {
+            logger.info("Friend synchronization is disabled; skipping the startup friends-list request.");
+        }
 
-        logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendCount + "/" + Constants.MAX_FRIENDS + " friends");
+        String friendSummary = shouldQueryFriendsOnStartup()
+            ? friendCount + "/" + Constants.MAX_FRIENDS
+            : "not queried";
+        logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendSummary + " friends");
 
         if (handleFriendship()) {
             logger.info("Waiting for friendship to be processed...");
@@ -218,6 +254,14 @@ public abstract class SessionManagerCore {
     protected abstract boolean handleFriendship();
 
     /**
+     * Whether startup should make a People API request. Session publishing does
+     * not require a friends-list request, so safe publisher configurations skip it.
+     */
+    protected boolean shouldQueryFriendsOnStartup() {
+        return true;
+    }
+
+    /**
      * Setup a new session and its prerequisites
      *
      * @throws SessionCreationException If the initial creation of the session fails
@@ -251,10 +295,25 @@ public abstract class SessionManagerCore {
                 throw new SessionCreationException("Unable to get connectionId for session: " + e.getMessage());
             }
 
-            setupNetherNet();
+            if (this.sessionInfo.isExternalNetherNetHosted()) {
+                // External-hosted mode still publishes a Minecraft JSON-RPC
+                // connection. setupNetherNet() normally initializes this
+                // value, but that method is intentionally skipped when the
+                // actual NetherNet listener lives in Geyser.
+                this.sessionInfo.setPmsgId(manager.getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid"));
+                if (this.sessionInfo.getNetherNetId() == null || this.sessionInfo.getNetherNetId().signum() < 1) {
+                    throw new SessionCreationException("External NetherNet mode has no valid NetherNet ID. Wait for Geyser readiness before publishing.");
+                }
+                if (this.sessionInfo.getPmsgId() == null || this.sessionInfo.getPmsgId().isBlank()) {
+                    throw new SessionCreationException("External NetherNet mode has no PmsgId in the Minecraft session token.");
+                }
+                logger.info("Using externally hosted NetherNet ID: " + this.sessionInfo.getNetherNetId());
+            } else {
+                setupNetherNet();
 
-            if (this.netherNetChannel == null || !this.netherNetChannel.isOpen()) {
-                throw new SessionCreationException("Unable to start NetherNet channel");
+                if (this.netherNetChannel == null || !this.netherNetChannel.isOpen()) {
+                    throw new SessionCreationException("Unable to start NetherNet channel");
+                }
             }
         }
 
@@ -354,19 +413,112 @@ public abstract class SessionManagerCore {
             throw new SessionUpdateException("Unable to update session information, error parsing json: " + e.getMessage());
         }
 
-        HttpResponse<String> createSessionResponse;
+        String lastFailure = "unknown update failure";
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            HttpResponse<String> createSessionResponse;
+            try {
+                createSessionResponse = httpClient.send(createSessionRequest, HttpResponse.BodyHandlers.ofString());
+            } catch (IOException | InterruptedException e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                lastFailure = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                if (attempt < 3) {
+                    sleepBeforeRetry(attempt, 0);
+                    continue;
+                }
+                markSessionUpdateFailure(lastFailure);
+                throw new SessionUpdateException(lastFailure);
+            }
+
+            if (createSessionResponse.statusCode() == 200 || createSessionResponse.statusCode() == 201) {
+                markSessionUpdateSuccess();
+                // Keep a live, sanitized-by-construction copy of the Xbox session
+                // response. This is used by the local harness and diagnostics; it
+                // contains the API response only and never request headers/tokens.
+                try {
+                    storageManager.currentSessionResponse(createSessionResponse.body());
+                } catch (IOException exception) {
+                    logger.warn("Xbox session updated, but the live session snapshot could not be saved: " + exception.getMessage());
+                }
+                return createSessionResponse.body();
+            }
+
+            lastFailure = "Unable to update session information, got status " + createSessionResponse.statusCode();
+            if (createSessionResponse.statusCode() == 429 || createSessionResponse.statusCode() >= 500) {
+                if (attempt < 3) {
+                    int retryAfter = createSessionResponse.headers().firstValue("Retry-After")
+                        .map(value -> {
+                            try {
+                                return Integer.parseInt(value);
+                            } catch (NumberFormatException ignored) {
+                                return 0;
+                            }
+                        })
+                        .orElse(0);
+                    sleepBeforeRetry(attempt, retryAfter);
+                    continue;
+                }
+            }
+
+            logger.warn("Xbox session update failed: " + lastFailure);
+            markSessionUpdateFailure(lastFailure);
+            throw new SessionUpdateException(lastFailure);
+        }
+
+        markSessionUpdateFailure(lastFailure);
+        throw new SessionUpdateException(lastFailure);
+    }
+
+    private void sleepBeforeRetry(int attempt, int retryAfterSeconds) throws SessionUpdateException {
+        long exponentialSeconds = 1L << Math.min(attempt - 1, 3);
+        long delaySeconds = Math.min(30L, Math.max(exponentialSeconds, retryAfterSeconds));
+        logger.warn("Retrying Xbox session update in " + delaySeconds + " second(s) (attempt " + (attempt + 1) + "/3).");
         try {
-            createSessionResponse = httpClient.send(createSessionRequest, HttpResponse.BodyHandlers.ofString());
-        } catch (IOException | InterruptedException e) {
-            throw new SessionUpdateException(e.getMessage());
+            Thread.sleep(delaySeconds * 1000L);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            markSessionUpdateFailure("Interrupted while waiting to retry session update");
+            throw new SessionUpdateException("Interrupted while waiting to retry session update");
         }
+    }
 
-        if (createSessionResponse.statusCode() != 200 && createSessionResponse.statusCode() != 201) {
-            logger.info("Got update session response: " + createSessionResponse.body());
-            throw new SessionUpdateException("Unable to update session information, got status " + createSessionResponse.statusCode() + " trying to update: " + createSessionResponse.body());
+    protected void markSessionUpdateSuccess() {
+        lastSuccessfulSessionUpdate = Instant.now();
+        lastSessionError = "none";
+        consecutiveSessionFailures = 0;
+        sessionHealthy = true;
+    }
+
+    protected void markSessionUpdateFailure(String message) {
+        lastSessionError = message == null || message.isBlank() ? "unknown update failure" : message;
+        consecutiveSessionFailures++;
+        if (consecutiveSessionFailures >= 3) {
+            sessionHealthy = false;
         }
+    }
 
-        return createSessionResponse.body();
+    public boolean isSessionHealthy() {
+        return sessionHealthy;
+    }
+
+    public void markUnhealthy(String reason) {
+        sessionHealthy = false;
+        markSessionUpdateFailure(reason);
+    }
+
+    public String statusSummary() {
+        String id = sessionInfo == null ? "<none>" : sessionInfo.getSessionId();
+        String netherNetId = sessionInfo == null || sessionInfo.getNetherNetId() == null
+            ? "<none>" : sessionInfo.getNetherNetId().toString();
+        boolean pmsgPresent = sessionInfo != null && sessionInfo.getPmsgId() != null && !sessionInfo.getPmsgId().isBlank();
+        return "healthy=" + sessionHealthy
+            + ", sessionId=" + id
+            + ", netherNetId=" + netherNetId
+            + ", pmsgIdPresent=" + pmsgPresent
+            + ", lastUpdate=" + (lastSuccessfulSessionUpdate == null ? "never" : lastSuccessfulSessionUpdate)
+            + ", consecutiveFailures=" + consecutiveSessionFailures
+            + ", lastError=" + lastSessionError;
     }
 
     /**
@@ -375,7 +527,8 @@ public abstract class SessionManagerCore {
      */
     protected void checkConnection() {
         boolean rtaIsOpen = this.rtaWebsocket != null && this.rtaWebsocket.isOpen();
-        boolean rtcIsOpen = this.netherNetChannel != null && this.netherNetChannel.isOpen();
+        boolean rtcIsOpen = this.sessionInfo != null && this.sessionInfo.isExternalNetherNetHosted()
+            || this.netherNetChannel != null && this.netherNetChannel.isOpen();
 
         // Check if the connection is Lost
         if (!rtaIsOpen || !rtcIsOpen) {
@@ -477,7 +630,7 @@ public abstract class SessionManagerCore {
             ServerBootstrap b = new ServerBootstrap();
             b.group(bossGroup, workerGroup)
                 .channelFactory(NetherNetChannelFactory.server(new PeerConnectionFactory(), signaling))
-                .childHandler(new BroadcasterChannelInitializer(sessionInfo, this, logger));
+                .childHandler(new BroadcasterChannelInitializer(this, logger));
 
             PortAllocatorConfig portAllocatorConfig = netherNetPortAllocatorConfig();
             if (portAllocatorConfig != null) {
@@ -495,6 +648,40 @@ public abstract class SessionManagerCore {
         }
     }
 
+    public void newBridgeClient(Consumer<BridgeClientSession> sessionConsumer) {
+        if (this.workerGroup == null) {
+            throw new IllegalStateException("NetherNet worker group is not initialized");
+        }
+
+        String host = sessionInfo.getRelayTargetAddress() != null && !sessionInfo.getRelayTargetAddress().isBlank()
+            ? sessionInfo.getRelayTargetAddress()
+            : sessionInfo.getIp();
+        int port = sessionInfo.getRelayTargetPort() > 0
+            ? sessionInfo.getRelayTargetPort()
+            : sessionInfo.getPort();
+
+        Channel channel = new Bootstrap()
+            .group(this.workerGroup)
+            .channelFactory(RakChannelFactory.client(NioDatagramChannel.class))
+            .option(RakChannelOption.RAK_PROTOCOL_VERSION, Constants.BEDROCK_CODEC.getRaknetProtocolVersion())
+            .handler(new BedrockChannelInitializer<BridgeClientSession>() {
+                @Override
+                protected BridgeClientSession createSession0(BedrockPeer peer, int subClientId) {
+                    return new BridgeClientSession(peer, subClientId);
+                }
+
+                @Override
+                protected void initSession(BridgeClientSession session) {
+                    sessionConsumer.accept(session);
+                }
+            })
+            .connect(new InetSocketAddress(host, port))
+            .awaitUninterruptibly()
+            .channel();
+
+        this.bridgeClientChannels.add(channel);
+    }
+
     /**
      * Stop the current session and close the websocket
      */
@@ -509,6 +696,10 @@ public abstract class SessionManagerCore {
     }
 
     private void shutdownNetherNet() {
+        for (Channel bridgeClientChannel : bridgeClientChannels) {
+            bridgeClientChannel.close();
+        }
+        bridgeClientChannels.clear();
         if (netherNetChannel != null) {
             netherNetChannel.close();
             netherNetChannel = null;

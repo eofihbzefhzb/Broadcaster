@@ -14,6 +14,15 @@ public class SessionInfo {
     private int maxPlayers;
     private String ip;
     private int port;
+    private String joinability = "joinable_by_friends";
+    private String worldType = "Survival";
+    private boolean editorWorld;
+    private boolean hardcore;
+    private boolean proxyBridgeEnabled;
+    private String relayTargetAddress;
+    private int relayTargetPort;
+    private boolean externalNetherNetHosted;
+    private String externalNetherNetId;
 
     public SessionInfo() {
     }
@@ -100,8 +109,90 @@ public class SessionInfo {
         this.port = port;
     }
 
+    public String getJoinability() {
+        return joinability;
+    }
+
+    public void setJoinability(String joinability) {
+        this.joinability = joinability;
+    }
+
+    public String getWorldType() {
+        return worldType;
+    }
+
+    public void setWorldType(String worldType) {
+        this.worldType = worldType;
+    }
+
+    public boolean isEditorWorld() {
+        return editorWorld;
+    }
+
+    public void setEditorWorld(boolean editorWorld) {
+        this.editorWorld = editorWorld;
+    }
+
+    public boolean isHardcore() {
+        return hardcore;
+    }
+
+    public void setHardcore(boolean hardcore) {
+        this.hardcore = hardcore;
+    }
+
+    public boolean isProxyBridgeEnabled() {
+        return proxyBridgeEnabled;
+    }
+
+    public void setProxyBridgeEnabled(boolean proxyBridgeEnabled) {
+        this.proxyBridgeEnabled = proxyBridgeEnabled;
+    }
+
+    public String getRelayTargetAddress() {
+        return relayTargetAddress;
+    }
+
+    public void setRelayTargetAddress(String relayTargetAddress) {
+        this.relayTargetAddress = relayTargetAddress;
+    }
+
+    public int getRelayTargetPort() {
+        return relayTargetPort;
+    }
+
+    public void setRelayTargetPort(int relayTargetPort) {
+        this.relayTargetPort = relayTargetPort;
+    }
+
+    public boolean isExternalNetherNetHosted() {
+        return externalNetherNetHosted;
+    }
+
+    public void setExternalNetherNetHosted(boolean externalNetherNetHosted) {
+        this.externalNetherNetHosted = externalNetherNetHosted;
+    }
+
+    public String getExternalNetherNetId() {
+        return externalNetherNetId;
+    }
+
+    public void setExternalNetherNetId(String externalNetherNetId) {
+        this.externalNetherNetId = externalNetherNetId;
+    }
+
     public SessionInfo copy() {
-        return new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
+        SessionInfo copy = new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
+        copy.setJoinability(joinability);
+        copy.setWorldType(worldType);
+        copy.setEditorWorld(editorWorld);
+        copy.setHardcore(hardcore);
+        copy.setProxyBridgeEnabled(proxyBridgeEnabled);
+        copy.setRelayTargetAddress(relayTargetAddress);
+        copy.setRelayTargetPort(relayTargetPort);
+        copy.setExternalNetherNetHosted(externalNetherNetHosted);
+        copy.setExternalNetherNetId(externalNetherNetId);
+        return copy;
     }
 
     private static String removeColorCodes(String string) {

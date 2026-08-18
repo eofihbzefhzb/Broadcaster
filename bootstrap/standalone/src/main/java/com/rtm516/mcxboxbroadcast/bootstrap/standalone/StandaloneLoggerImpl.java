@@ -81,10 +81,40 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                 case "stop", "exit" -> System.exit(0);
                 case "restart" -> StandaloneMain.restart();
                 case "dumpsession" -> {
+                    if (StandaloneMain.sessionManager == null) {
+                        warn("Session publishing is disabled.");
+                        return;
+                    }
                     info("Dumping session responses to 'lastSessionResponse.json' and 'currentSessionResponse.json'");
                     StandaloneMain.sessionManager.dumpSession();
                 }
+                case "status", "health" -> {
+                    if (StandaloneMain.sessionManager == null) {
+                        warn("Session publishing is disabled.");
+                        return;
+                    }
+                    info(StandaloneMain.sessionManager.statusSummary());
+                }
+                case "invite" -> {
+                    if (StandaloneMain.sessionManager == null) {
+                        warn("Session publishing is disabled.");
+                        return;
+                    }
+                    if (args.length != 1) {
+                        warn("Usage: invite <xuid>");
+                        return;
+                    }
+                    if (StandaloneMain.sessionManager.friendManager().sendInvite(args[0])) {
+                        info("Invitation request accepted by Xbox for XUID " + args[0]);
+                    } else {
+                        warn("Invitation was not sent for XUID " + args[0] + ".");
+                    }
+                }
                 case "accounts" -> {
+                    if (StandaloneMain.sessionManager == null) {
+                        warn("Session publishing is disabled.");
+                        return;
+                    }
                     if (args.length == 0) {
                         warn("Usage:");
                         warn("accounts list");
@@ -105,6 +135,8 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("exit - Exit the application");
                     info("restart - Restart the application");
                     info("dumpsession - Dump the current session to json files");
+                    info("status - Show session, NetherNet, PmsgId, and health state");
+                    info("invite <xuid> - Send an invitation to the current session");
                     info("accounts list - List sub-accounts");
                     info("accounts add <sub-session-id> - Add a sub-account");
                     info("accounts remove <sub-session-id> - Remove a sub-account");

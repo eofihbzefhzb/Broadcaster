@@ -29,6 +29,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class FriendManager {
+    private static final long MANUAL_INVITE_COOLDOWN_MILLIS = 10_000L;
+
     private final HttpClient httpClient;
     private final Logger logger;
     private final SessionManagerCore sessionManager;
@@ -39,6 +41,7 @@ public class FriendManager {
     private Future<?> internalScheduledFuture;
     private boolean initialInvite;
     private boolean shouldAcceptPendingRequests = true;
+    private volatile long lastManualInviteAt;
 
     public FriendManager(HttpClient httpClient, Logger logger, SessionManagerCore sessionManager) {
         this.httpClient = httpClient;
@@ -373,7 +376,7 @@ public class FriendManager {
 
                         // Let the user know we added a friend
                         logger.info("Added " + entry.getValue() + " (" + entry.getKey() + ") as a friend");
-                        sendInvite(entry.getKey());
+                        sendInviteIfEnabled(entry.getKey());
 
                         // Update the user in the cache
                         Optional<FollowerResponse.Person> friend = lastFriendCache.stream().filter(p -> p.xuid.equals(entry.getKey())).findFirst();
@@ -594,7 +597,7 @@ public class FriendManager {
                     continue;
                 }
                 logger.info("Added " + friend.get().gamertag + " (" + xuid + ") as a friend");
-                sendInvite(xuid);
+                sendInviteIfEnabled(xuid);
             }
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to accept friend requests", e);
@@ -606,12 +609,44 @@ public class FriendManager {
      *
      * @param xuid The XUID of the user to invite
      */
-    public void sendInvite(String xuid) {
-        // Only invite if enabled
-        if (!initialInvite) {
+    public boolean sendInvite(String xuid) {
+        String normalizedXuid = normalizeXuid(xuid);
+        if (normalizedXuid == null) {
+            logger.warn("Refusing to send invitation: invalid XUID '" + xuid + "'.");
+            return false;
+        }
+
+        if (!sessionManager.isSessionHealthy()) {
+            logger.warn("Refusing to send invitation to XUID " + normalizedXuid + ": Xbox session is unhealthy. Use status for details.");
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastManualInviteAt;
+        if (elapsed >= 0 && elapsed < MANUAL_INVITE_COOLDOWN_MILLIS) {
+            long remaining = (MANUAL_INVITE_COOLDOWN_MILLIS - elapsed + 999) / 1000;
+            logger.warn("Refusing to send invitation to XUID " + normalizedXuid + ": manual invite cooldown is active for " + remaining + " more seconds.");
+            return false;
+        }
+
+        lastManualInviteAt = now;
+        return sendInviteRequest(normalizedXuid);
+    }
+
+    private void sendInviteIfEnabled(String xuid) {
+        if (!initialInvite || !sessionManager.isSessionHealthy()) {
             return;
         }
 
+        String normalizedXuid = normalizeXuid(xuid);
+        if (normalizedXuid == null) {
+            logger.warn("Refusing automatic invitation: invalid XUID '" + xuid + "'.");
+            return;
+        }
+        sendInviteRequest(normalizedXuid);
+    }
+
+    private boolean sendInviteRequest(String xuid) {
         try {
             CreateHandleRequest createHandleContent = new CreateHandleRequest(
                 1,
@@ -633,9 +668,29 @@ public class FriendManager {
                 .build();
 
             HttpResponse<String> inviteResponse = httpClient.send(sendInvite, HttpResponse.BodyHandlers.ofString());
-            logger.debug(inviteResponse.body());
+            if (inviteResponse.statusCode() >= 200 && inviteResponse.statusCode() < 300) {
+                logger.info("Sent session invitation to XUID " + xuid);
+                return true;
+            } else {
+                logger.warn("Failed to send session invitation to XUID " + xuid + ": HTTP " + inviteResponse.statusCode());
+                logger.debug(inviteResponse.body());
+            }
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to send invite to " + xuid + ": " + e.getMessage());
+        }
+        return false;
+    }
+
+    private static String normalizeXuid(String xuid) {
+        if (xuid == null || !xuid.matches("[0-9]{1,20}")) {
+            return null;
+        }
+
+        try {
+            long parsed = Long.parseUnsignedLong(xuid);
+            return parsed == 0 ? null : Long.toUnsignedString(parsed);
+        } catch (NumberFormatException exception) {
+            return null;
         }
     }
 }

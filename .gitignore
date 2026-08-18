@@ -262,3 +262,8 @@ release_notes.md
 bootstrap/standalone/cache/
 bootstrap/standalone/logs/
 bootstrap/standalone/config.yml
+# Local MCXboxBroadcast runtime files
+cache/
+logs/
+config.yml
+screenshot.jpg
