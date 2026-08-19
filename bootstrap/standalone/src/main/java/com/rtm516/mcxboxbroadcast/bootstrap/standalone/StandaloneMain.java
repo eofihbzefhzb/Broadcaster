@@ -25,19 +25,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
     private static final String REQUIRED_JOINABILITY = "joinable_by_friends";
-    private static final String[] STATUS_FILE_CANDIDATES = new String[] {
-        "./portal-session-status.json",
-        "../portal-session-status.json",
-        "../plugins/Geyser-Velocity/portal-session-status.json",
-        "../../plugins/Geyser-Velocity/portal-session-status.json",
-        System.getProperty("user.home") + "/mc/plugins/Geyser-Velocity/portal-session-status.json",
-        System.getProperty("user.home") + "/mc/server/plugins/Geyser-Velocity/portal-session-status.json"
-    };
+    
     private static CoreConfig config;
     private static StandaloneLoggerImpl logger;
     private static SessionInfo sessionInfo;
@@ -46,6 +43,39 @@ public class StandaloneMain {
     private static String discoveredExternalNetworkId;
 
     public static SessionManager sessionManager;
+
+    /**
+     * Dynamically resolves candidate paths for the Geyser status file.
+     * Prioritizes user-defined JVM arguments and environment variables before falling back to common relative paths.
+     */
+    private static Iterable<String> getStatusFileCandidates() {
+        List<String> candidates = new ArrayList<>();
+
+        // 1. Check for a JVM argument: java -Dgeyser.status.file="/path/to/file.json" -jar Broadcaster.jar
+        String sysProp = System.getProperty("geyser.status.file");
+        if (sysProp != null && !sysProp.isBlank()) {
+            candidates.add(sysProp);
+        }
+
+        // 2. Check for an Environment Variable
+        String envVar = System.getenv("GEYSER_STATUS_FILE");
+        if (envVar != null && !envVar.isBlank()) {
+            candidates.add(envVar);
+        }
+
+        // 3. Fallback to common relative and home directory paths
+        candidates.addAll(Arrays.asList(
+            "./portal-session-status.json",
+            "../portal-session-status.json",
+            "../plugins/Geyser-Velocity/portal-session-status.json",
+            "../../plugins/Geyser-Velocity/portal-session-status.json",
+            "../Velocity/plugins/Geyser-Velocity/portal-session-status.json",
+            System.getProperty("user.home") + "/mc/plugins/Geyser-Velocity/portal-session-status.json",
+            System.getProperty("user.home") + "/mc/server/plugins/Geyser-Velocity/portal-session-status.json"
+        ));
+
+        return candidates;
+    }
 
     public static void main(String[] args) throws Exception {
         logger = new StandaloneLoggerImpl(LoggerFactory.getLogger(StandaloneMain.class));
@@ -64,10 +94,6 @@ public class StandaloneMain {
 
         logger.setDebug(config.debugMode());
 
-        // Initialize the publisher before NetherNet discovery. Geyser's
-        // externally hosted ingress uses the authorization header written by
-        // MCXboxBroadcast, so waiting for Geyser first can otherwise create a
-        // deadlock when the cached token is expired.
         notificationManager = new SlackNotificationManager(logger, config.notifications());
         if (config.enabled()) {
             sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
@@ -114,14 +140,12 @@ public class StandaloneMain {
         }
 
         if (config.enabled()) {
-            // Fallback to the gamertag if the host name is empty
             if (sessionInfo.getHostName().isEmpty()) {
                 sessionInfo.setHostName(sessionManager.getGamertag());
             }
 
             PingUtil.setWebPingEnabled(config.session().webQueryFallback());
 
-            // Sync the session info from the server if needed
             updateSessionInfo(sessionInfo);
 
             createSession();
@@ -141,7 +165,6 @@ public class StandaloneMain {
         try {
             sessionManager.shutdown();
 
-            // Create a new session manager, but reuse the notification manager as config hasn't been reloaded
             sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
             sessionManager.setNetherNetPortRange(config.session().icePortRange().min(), config.session().icePortRange().max());
             sessionManager.shardNetworkIdResolver(StandaloneMain::discoverShardNetworkId);
@@ -156,8 +179,6 @@ public class StandaloneMain {
         sessionManager.restartCallback(StandaloneMain::restart);
         boolean initialized = sessionManager.init(sessionInfo, config.friendSync());
 
-        // If the session failed to initialize, don't start the update loop
-        // We assume an error has already been logged
         if (!initialized) {
             return;
         }
@@ -168,7 +189,6 @@ public class StandaloneMain {
             }
 
             try {
-                // Update the session
                 sessionManager.updateSession(sessionInfo);
                 if (config.suppressSessionUpdateMessage()) {
                     sessionManager.logger().debug("Updated session!");
@@ -201,14 +221,12 @@ public class StandaloneMain {
                     : new InetSocketAddress(sessionInfo.getIp(), sessionInfo.getPort());
                 BedrockPong pong = PingUtil.ping(addressToPing, 1500, TimeUnit.MILLISECONDS).get();
 
-                // Update the session information
                 sessionInfo.setHostName(pong.subMotd());
                 sessionInfo.setWorldName(pong.motd());
                 sessionInfo.setPlayers(pong.playerCount());
                 sessionInfo.setMaxPlayers(pong.maximumPlayerCount());
                 applySessionSettings(sessionInfo);
 
-                // Fallback to the gamertag if the host name is empty
                 if (sessionInfo.getHostName().isEmpty()) {
                     sessionInfo.setHostName(sessionManager.getGamertag());
                 }
@@ -222,7 +240,6 @@ public class StandaloneMain {
                     sessionInfo.setMaxPlayers(config.session().sessionInfo().maxPlayers());
                     applySessionSettings(sessionInfo);
 
-                    // Fallback to the gamertag if the host name is empty
                     if (sessionInfo.getHostName().isEmpty()) {
                         sessionInfo.setHostName(sessionManager.getGamertag());
                     }
@@ -235,7 +252,7 @@ public class StandaloneMain {
     }
 
     private static boolean updateSessionInfoFromStatusFile(SessionInfo sessionInfo) {
-        for (String candidate : STATUS_FILE_CANDIDATES) {
+        for (String candidate : getStatusFileCandidates()) {
             try {
                 Path path = Path.of(candidate).normalize();
                 if (!Files.isRegularFile(path)) {
@@ -307,11 +324,6 @@ public class StandaloneMain {
         applySubseasonSuffix(sessionInfo);
     }
 
-    /**
-     * Appends " (<subseason>)" to the advertised secondary MOTD (host name) so that when several
-     * subseasons share a single Geyser instance's NetherNet portal bridge, each subseason's Xbox
-     * session is still distinguishable. Idempotent - safe to call multiple times per update cycle.
-     */
     private static void applySubseasonSuffix(SessionInfo sessionInfo) {
         int subseason = config.netherNet().subseason();
         if (subseason <= 0) {
@@ -397,10 +409,6 @@ public class StandaloneMain {
         return "";
     }
 
-    /**
-     * Wait for Paper/Geyser when standalone is started first. Geyser writes
-     * the generated ID only after its NetherNet signaling server is bound.
-     */
     private static String waitForExternalNetworkId() {
         int timeoutSeconds = config.netherNet().discoveryTimeoutSeconds();
         if (timeoutSeconds <= 0) {
@@ -427,10 +435,6 @@ public class StandaloneMain {
         return "";
     }
 
-    /**
-     * Keep the published session aligned if Geyser regenerates or changes a
-     * shard identity while this process remains running.
-     */
     private static void refreshExternalNetworkId() {
         if (!config.netherNet().externalHosted() || !config.netherNet().externalNetworkId().isBlank()) {
             return;
@@ -463,18 +467,11 @@ public class StandaloneMain {
             }
         }
 
-        // Do not fall back to the legacy one-line ID file. It has no readiness
-        // or freshness information and can advertise a dead identity after a crash.
         return "";
     }
 
-    /**
-     * Reads the live status file written by Geyser. This is the preferred
-     * discovery source because it is published beside the session metadata
-     * and contains all shard IDs in one place.
-     */
     private static String discoverStatusNetworkId(int subseason) {
-        for (String candidate : STATUS_FILE_CANDIDATES) {
+        for (String candidate : getStatusFileCandidates()) {
             try {
                 Path path = Path.of(candidate).normalize();
                 if (!Files.isRegularFile(path)) {
@@ -506,7 +503,6 @@ public class StandaloneMain {
                     }
                 }
             } catch (Exception ignored) {
-                // Geyser may be writing the file at the same time; try again on the next poll.
             }
         }
 
@@ -532,15 +528,12 @@ public class StandaloneMain {
         }
     }
 
-    /** Looks up a ready NetherNet ID for a specific subseason. */
     private static String discoverShardNetworkId(int subseason) {
         String readyStatusNetworkId = discoverStatusNetworkId(subseason);
         if (!readyStatusNetworkId.isBlank()) {
             return readyStatusNetworkId;
         }
 
-        // Do not use the legacy shard file as a source of truth for a live
-        // session; it has no readiness or freshness metadata.
         return "";
     }
 }
