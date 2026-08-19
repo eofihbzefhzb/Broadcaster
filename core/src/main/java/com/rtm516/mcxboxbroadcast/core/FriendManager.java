@@ -308,7 +308,8 @@ public class FriendManager {
                         }
                     }
                 } catch (Exception e) {
-                    logger.error("Failed to sync friends", e);
+                    // SILENCÉ : Remplacé par debug pour éviter le spam de la console sur les timeouts Xbox Live
+                    logger.debug("Failed to sync friends", e);
                 }
             }, friendSyncConfig.updateInterval(), friendSyncConfig.updateInterval(), TimeUnit.SECONDS);
         }
