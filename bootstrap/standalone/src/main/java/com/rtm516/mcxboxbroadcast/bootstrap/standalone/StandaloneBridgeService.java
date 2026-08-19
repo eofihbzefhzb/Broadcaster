@@ -1,9 +1,12 @@
-package com.rtm516.mcxboxbroadcast.bootstrap.standalone.bridge;
+package com.rtm516.mcxboxbroadcast.bootstrap.standalone;
 
 import com.rtm516.mcxboxbroadcast.core.Constants;
 import com.rtm516.mcxboxbroadcast.core.Logger;
 import com.rtm516.mcxboxbroadcast.core.SessionInfo;
 import com.rtm516.mcxboxbroadcast.core.configs.CoreConfig;
+import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.BridgeClientSession;
+import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.BridgeUpstreamPacketHandler;
+import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.NetherNetBridgeServerSession;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -15,6 +18,7 @@ import org.cloudburstmc.netty.channel.raknet.config.RakChannelOption;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockPong;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockCodec;
+import org.cloudburstmc.protocol.bedrock.data.PacketCompressionAlgorithm;
 import org.cloudburstmc.protocol.bedrock.netty.initializer.BedrockChannelInitializer;
 
 import java.net.InetSocketAddress;
@@ -49,15 +53,16 @@ public final class StandaloneBridgeService {
             .group(this.eventLoopGroup)
             .channelFactory(RakChannelFactory.server(NioDatagramChannel.class))
             .option(RakChannelOption.RAK_ADVERTISEMENT, advertisement.toByteBuf())
-            .childHandler(new BedrockChannelInitializer<BridgeServerSession>() {
+            .childHandler(new BedrockChannelInitializer<NetherNetBridgeServerSession>() {
                 @Override
-                protected BridgeServerSession createSession0(BedrockPeer peer, int subClientId) {
-                    return new BridgeServerSession(peer, subClientId);
+                protected NetherNetBridgeServerSession createSession0(BedrockPeer peer, int subClientId) {
+                    return new NetherNetBridgeServerSession(peer, subClientId);
                 }
 
                 @Override
-                protected void initSession(BridgeServerSession session) {
-                    session.setPacketHandler(new BridgeUpstreamPacketHandler(session, StandaloneBridgeService.this, logger));
+                protected void initSession(NetherNetBridgeServerSession session) {
+                    // Utilise la compression SNAPPY pour le mode standalone
+                    session.setPacketHandler(new BridgeUpstreamPacketHandler(session, StandaloneMain.sessionManager, logger, PacketCompressionAlgorithm.SNAPPY));
                 }
             })
             .bind(proxyAddress)

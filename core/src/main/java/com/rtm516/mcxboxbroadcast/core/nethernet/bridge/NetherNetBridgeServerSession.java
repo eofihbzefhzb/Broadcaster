@@ -38,11 +38,15 @@ public final class NetherNetBridgeServerSession extends BedrockServerSession {
 
         if (this.packetHandler.handlePacket(packet) == PacketSignal.UNHANDLED && this.sendSession != null) {
             ByteBuf buffer = wrapper.getPacketBuffer().retainedSlice().skipBytes(wrapper.getHeaderLength());
-
-            UnknownPacket sendPacket = new UnknownPacket();
-            sendPacket.setPayload(buffer);
-            sendPacket.setPacketId(wrapper.getPacketId());
-            this.sendSession.sendPacket(sendPacket);
+            try {
+                UnknownPacket sendPacket = new UnknownPacket();
+                sendPacket.setPayload(buffer);
+                sendPacket.setPacketId(wrapper.getPacketId());
+                this.sendSession.sendPacket(sendPacket);
+            } catch (Exception e) {
+                buffer.release();
+                throw e;
+            }
         }
     }
 }

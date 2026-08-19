@@ -25,14 +25,21 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
     private final NetherNetBridgeServerSession session;
     private final SessionManagerCore sessionManager;
     private final Logger logger;
+    private final PacketCompressionAlgorithm compressionAlgorithm;
+    
     private JSONObject skinData;
     private ChainValidationResult chain;
     private String clientJwt;
 
-    public BridgeUpstreamPacketHandler(NetherNetBridgeServerSession session, SessionManagerCore sessionManager, Logger logger) {
+    public BridgeUpstreamPacketHandler(NetherNetBridgeServerSession session, SessionManagerCore sessionManager, Logger logger, PacketCompressionAlgorithm compressionAlgorithm) {
         this.session = session;
         this.sessionManager = sessionManager;
         this.logger = logger;
+        this.compressionAlgorithm = compressionAlgorithm;
+    }
+
+    public BridgeUpstreamPacketHandler(NetherNetBridgeServerSession session, SessionManagerCore sessionManager, Logger logger) {
+        this(session, sessionManager, logger, PacketCompressionAlgorithm.ZLIB);
     }
 
     @Override
@@ -54,14 +61,10 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
 
         NetworkSettingsPacket networkSettingsPacket = new NetworkSettingsPacket();
         networkSettingsPacket.setCompressionThreshold(0);
-        // NetherNetBedrockPeer uses the raw-ZLIB strategy for the Bedrock stream.
-        // Advertising SNAPPY here makes the Bedrock client decode the first
-        // compressed gameplay packets with the wrong algorithm and leaves it
-        // stuck on "Connecting to multiplayer game".
-        networkSettingsPacket.setCompressionAlgorithm(PacketCompressionAlgorithm.ZLIB);
+        networkSettingsPacket.setCompressionAlgorithm(this.compressionAlgorithm);
 
         session.sendPacketImmediately(networkSettingsPacket);
-        session.setCompression(PacketCompressionAlgorithm.ZLIB);
+        session.setCompression(this.compressionAlgorithm);
         return PacketSignal.HANDLED;
     }
 
@@ -78,7 +81,6 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
             skinData = new JSONObject(JsonUtil.parseJson(jws.getUnverifiedPayload()));
 
             logger.info("Player " + chain.identityClaims().extraData.displayName + " (" + session.getSocketAddress() + ") joined the session");
-
             initializeBridgeSession();
         } catch (Exception e) {
             session.disconnect("disconnectionScreen.internalError.cantConnect");
