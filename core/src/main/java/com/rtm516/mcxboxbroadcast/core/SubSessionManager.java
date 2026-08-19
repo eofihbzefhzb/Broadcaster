@@ -21,11 +21,30 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Session manager for a sub-session.
+ * <p>
+ * Each sub-session is its own independently published Xbox session with its own NetherNet shard
+ * (resolved via the parent's shard network id resolver), relaying into the same backend server as
+ * the primary session. This spreads join/NetherNet capacity across multiple Xbox accounts/shards
+ * while sub-sessions still friend the primary account to help scale past the 2000-friend cap.
+ */
 public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
     private final int shardNumber;
     private final Map<String, String> nonces = new HashMap<>();
 
+    /**
+     * Create a new session manager for a sub-session
+     *
+     * @param id The id of the sub-session
+     * @param shardNumber The NetherNet portal-bridge shard number this sub-session uses (1 is
+     *                     reserved for the primary session, so this is always 2 or greater).
+     * @param parent The parent session manager
+     * @param storageManager The storage manager to use for storing data
+     * @param notificationManager The notification manager to use for sending messages
+     * @param logger The logger to use for outputting messages
+     */
     public SubSessionManager(String id, int shardNumber, SessionManager parent, StorageManager storageManager, NotificationManager notificationManager, Logger logger) {
         super(storageManager, notificationManager, logger.prefixed("Sub-Session " + id));
         this.parent = parent;
@@ -47,22 +66,46 @@ public class SubSessionManager extends SessionManagerCore {
         return sessionInfo.getSessionId();
     }
 
+    /**
+     * The NetherNet portal-bridge shard number this sub-session uses.
+     *
+     * @return The shard number (2 or greater)
+     */
     public int shardNumber() {
         return shardNumber;
     }
 
+    /**
+     * Initialize this sub-session as its own independently published Xbox session, using its
+     * own NetherNet shard and relaying into the same backend server as the parent.
+     */
     @Override
     public void init() throws SessionCreationException, SessionUpdateException {
         this.sessionInfo = new ExpandedSessionInfo("", "", buildShardSessionInfo());
         super.init();
-        // Plus de timer ici ! La synchro se fera sur commande par le parent.
     }
 
+    /**
+     * Refresh this sub-session's advertised state (players, max players, etc.) from the parent's
+     * current session info, keeping this shard's own host name and NetherNet id.
+     *
+     * @throws SessionUpdateException If the update fails
+     */
     public void syncFromParent() throws SessionUpdateException {
         this.sessionInfo.updateSessionInfo(buildShardSessionInfo());
+        
+        // Log de debug pour vérifier la synchro si le mode debug est actif dans config.yml
+        logger.debug("Sub-session synced -> Nom: " + sessionInfo.getHostName() + 
+                     " | Joueurs: " + sessionInfo.getPlayers() + "/" + sessionInfo.getMaxPlayers() + 
+                     " | NetherNet ID: " + sessionInfo.getExternalNetherNetId());
+
         updateSession();
     }
 
+    /**
+     * Build the SessionInfo this sub-session should advertise - a copy of the parent's current
+     * session, but with its own shard's NetherNet id (when externally hosted).
+     */
     private SessionInfo buildShardSessionInfo() {
         ExpandedSessionInfo parentInfo = parent.sessionInfo();
 
@@ -84,6 +127,8 @@ public class SubSessionManager extends SessionManagerCore {
         if (baseHostName == null || baseHostName.isBlank()) {
             baseHostName = "MCXboxBroadcast";
         }
+        
+        // Garde le même nom propre sans suffixe numérique
         shardInfo.setHostName(baseHostName);
 
         if (parentInfo.isExternalNetherNetHosted()) {
@@ -97,11 +142,19 @@ public class SubSessionManager extends SessionManagerCore {
 
     @Override
     protected boolean handleFriendship() {
+        // Add the main account
         boolean subAdd = friendManager().addIfRequired(parent.getXuid(), parent.getGamertag());
+
+        // Get the main account to add us
         boolean mainAdd = parent.friendManager().addIfRequired(getXuid(), getGamertag());
+
         return subAdd || mainAdd;
     }
 
+    /**
+     * Generate join nonces for this sub-session's own session members - mirrors the primary
+     * session's nonce handling since this sub-session now hosts its own real, joinable session.
+     */
     @Override
     public void updateNonces() throws SessionUpdateException {
         HttpRequest getSessionRequest = HttpRequest.newBuilder()
@@ -121,12 +174,14 @@ public class SubSessionManager extends SessionManagerCore {
             }
 
             boolean hasChanges;
+
             Set<String> activeXuids = new HashSet<>();
             for (Map.Entry<String, SessionMember> entry : sessionResponse.members().entrySet()) {
                 activeXuids.add(entry.getValue().constants().get("system").xuid());
             }
 
             activeXuids.remove(sessionInfo.getXuid());
+
             hasChanges = nonces.keySet().retainAll(activeXuids);
 
             for (String xuid : activeXuids) {
@@ -137,6 +192,7 @@ public class SubSessionManager extends SessionManagerCore {
                     for (byte b : bytes) {
                         hex.append(String.format("%02x", b));
                     }
+
                     nonces.put(xuid, hex.toString());
                     hasChanges = true;
                 }
@@ -153,8 +209,11 @@ public class SubSessionManager extends SessionManagerCore {
     @Override
     protected void updateSession() throws SessionUpdateException {
         checkConnection();
+
         String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId()), new CreateSessionRequest(this.sessionInfo, nonces));
         try {
+            // Just confirm the response parses; unlike the primary session we don't restart on
+            // high player counts here - the primary session already handles that for the shared backend
             Constants.GSON.fromJson(responseBody, CreateSessionResponse.class);
         } catch (JsonParseException e) {
             throw new SessionUpdateException("Failed to parse session response: " + e.getMessage());
