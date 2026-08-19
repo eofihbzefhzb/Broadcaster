@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Session manager for a sub-session.
@@ -86,6 +87,15 @@ public class SubSessionManager extends SessionManagerCore {
         this.sessionInfo = new ExpandedSessionInfo("", "", buildShardSessionInfo());
 
         super.init();
+
+        // Synchronisation complètement silencieuse alignée sur les mises à jour
+        scheduledThread().scheduleWithFixedDelay(() -> {
+            try {
+                syncFromParent();
+            } catch (SessionUpdateException e) {
+                logger.error("Failed to sync sub-session from parent", e);
+            }
+        }, 30, 30, TimeUnit.SECONDS);
     }
 
     /**
@@ -125,7 +135,7 @@ public class SubSessionManager extends SessionManagerCore {
             baseHostName = "MCXboxBroadcast";
         }
         
-        // Modification ici : on assigne directement le nom de base sans ajouter de suffixe " (2)"
+        // Conserve le nom de base sans aucun suffixe numérique
         shardInfo.setHostName(baseHostName);
 
         if (parentInfo.isExternalNetherNetHosted()) {
