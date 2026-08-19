@@ -62,13 +62,6 @@ jobs:
     - uses: actions/upload-artifact@v7
       if: success()
       with:
-        name: MCXboxBroadcastExtension
-        path: bootstrap/geyser/build/libs/MCXboxBroadcastExtension.jar
-        if-no-files-found: error
-
-    - uses: actions/upload-artifact@v7
-      if: success()
-      with:
         name: MCXboxBroadcastStandalone
         path: bootstrap/standalone/build/libs/MCXboxBroadcastStandalone.jar
         if-no-files-found: error
@@ -86,18 +79,11 @@ jobs:
       if: ${{ success() && github.ref_name == 'master' }}
       run: git fetch --tags --force && git log -n 50 --pretty=format:"* %s (%h)" > release_notes.md
 
-    - name: Publish to Modrinth
-      if: ${{ success() && github.repository == 'MCXboxBroadcast/Broadcaster' &&  github.ref_name == 'master' }}
-      run: ./gradlew :bootstrap-geyser:modrinth
-      env:
-        BUILD_NUMBER: ${{ steps.getCurrentBuild.outputs.result }}
-        MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-
     - name: Create release
       uses: ncipollo/release-action@v1
       if: ${{ success() && github.ref_name == 'master' }}
       with:
-        artifacts: "bootstrap/geyser/build/libs/MCXboxBroadcastExtension.jar,bootstrap/standalone/build/libs/MCXboxBroadcastStandalone.jar,egg-m-c-xbox-broadcast.json"
+        artifacts: "bootstrap/standalone/build/libs/MCXboxBroadcastStandalone.jar,egg-m-c-xbox-broadcast.json"
         allowUpdates: true
         bodyFile: "release_notes.md"
         draft: false
