@@ -26,7 +26,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -40,6 +42,10 @@ public class StandaloneMain {
     private static NotificationManager notificationManager;
     private static StandaloneBridgeService bridgeService;
     private static String discoveredExternalNetworkId;
+
+    // ANTI-SPAM LOG CACHE : Permet de mémoriser le dernier ID logué pour éviter le spam en boucle
+    private static String lastLoggedPrimaryNetworkId = null;
+    private static final Map<Integer, String> lastLoggedShardNetworkIds = new HashMap<>();
 
     public static SessionManager sessionManager;
 
@@ -488,7 +494,13 @@ public class StandaloneMain {
                     if (shardIndex >= 0 && shardIndex < ids.size()) {
                         String networkId = ids.get(shardIndex).getAsString().replaceAll("[^0-9]", "");
                         if (!networkId.isBlank()) {
-                            logger.info("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
+                            // ANTI-SPAM LOG : Log en INFO uniquement si l'ID du shard change, sinon debug discret
+                            if (!networkId.equals(lastLoggedShardNetworkIds.get(subseason))) {
+                                logger.info("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
+                                lastLoggedShardNetworkIds.put(subseason, networkId);
+                            } else {
+                                logger.debug("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
+                            }
                             return networkId;
                         }
                     }
@@ -497,7 +509,13 @@ public class StandaloneMain {
                 if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
                     String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
                     if (!networkId.isBlank()) {
-                        logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
+                        // ANTI-SPAM LOG : Log en INFO uniquement si l'ID primaire change, sinon debug discret
+                        if (!networkId.equals(lastLoggedPrimaryNetworkId)) {
+                            logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
+                            lastLoggedPrimaryNetworkId = networkId;
+                        } else {
+                            logger.debug("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
+                        }
                         return networkId;
                     }
                 }
