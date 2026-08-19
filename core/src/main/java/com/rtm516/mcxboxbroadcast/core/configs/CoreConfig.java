@@ -202,8 +202,8 @@ public interface CoreConfig {
         @Comment("""
             The externally hosted NetherNet network id to advertise in the Xbox session.
             This must match the listener that actually accepts the NetherNet/WebRTC join.
-            Leave empty to auto-discover it from the Geyser fork's portal-nethernet-id.txt (or, when
-            subseason is set above 0, from the matching shard in portal-nethernet-shards.json).""")
+            Leave empty to auto-discover it from the Geyser fork's portal-session-status.json (or, when
+            subseason is set above 0, from the matching shard in the netherNetIds array of that same file).""")
         @DefaultString("")
         String externalNetworkId();
 
@@ -211,8 +211,8 @@ public interface CoreConfig {
             The subseason number this broadcaster instance represents, when running several subseasons
             off a single Geyser instance whose portal-bridge.shard-count is greater than 1.
             When set above 0:
-              - the NetherNet network id is auto-discovered from shard #<subseason> in the Geyser fork's
-                portal-nethernet-shards.json instead of the legacy single-shard portal-nethernet-id.txt
+              - the NetherNet network id is auto-discovered from shard #<subseason> in the netherNetIds
+                array of portal-session-status.json instead of the single netherNetId field
               - the advertised secondary MOTD (host-name) has " (<subseason>)" appended, so each
                 subseason's Xbox session is distinguishable
             Leave at 0 to use the legacy single-shard behaviour.""")

@@ -189,7 +189,7 @@ public abstract class SessionManagerCore {
 
         // Make sure we are logged in and get info
         try {
-            BedrockAuthManager manager = getAuthManager();
+            getAuthManager();
         } catch (AgeVerificationException e) {
             logger.error("Authentication failed due to the account requiring age verification. Please login to xbox.com and complete the age verification process, then try again.");
             logger.error("You can skip it/opt out and continue using the tool, but some features may not work correctly.");

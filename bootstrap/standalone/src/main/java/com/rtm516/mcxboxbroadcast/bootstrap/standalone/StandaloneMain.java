@@ -30,6 +30,14 @@ import java.util.concurrent.TimeUnit;
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
     private static final String REQUIRED_JOINABILITY = "joinable_by_friends";
+    private static final String[] STATUS_FILE_CANDIDATES = new String[] {
+        "./portal-session-status.json",
+        "../portal-session-status.json",
+        "../plugins/Geyser-Velocity/portal-session-status.json",
+        "../../plugins/Geyser-Velocity/portal-session-status.json",
+        System.getProperty("user.home") + "/mc/plugins/Geyser-Velocity/portal-session-status.json",
+        System.getProperty("user.home") + "/mc/server/plugins/Geyser-Velocity/portal-session-status.json"
+    };
     private static CoreConfig config;
     private static StandaloneLoggerImpl logger;
     private static SessionInfo sessionInfo;
@@ -227,16 +235,7 @@ public class StandaloneMain {
     }
 
     private static boolean updateSessionInfoFromStatusFile(SessionInfo sessionInfo) {
-        String[] candidates = new String[] {
-            "./portal-session-status.json",
-            "../portal-session-status.json",
-            "../plugins/Geyser-Velocity/portal-session-status.json",
-            "../../plugins/Geyser-Velocity/portal-session-status.json",
-            System.getProperty("user.home") + "/mc/plugins/Geyser-Velocity/portal-session-status.json",
-            System.getProperty("user.home") + "/mc/server/plugins/Geyser-Velocity/portal-session-status.json"
-        };
-
-        for (String candidate : candidates) {
+        for (String candidate : STATUS_FILE_CANDIDATES) {
             try {
                 Path path = Path.of(candidate).normalize();
                 if (!Files.isRegularFile(path)) {
@@ -475,16 +474,7 @@ public class StandaloneMain {
      * and contains all shard IDs in one place.
      */
     private static String discoverStatusNetworkId(int subseason) {
-        String[] candidates = new String[] {
-            "./portal-session-status.json",
-            "../portal-session-status.json",
-            "../plugins/Geyser-Velocity/portal-session-status.json",
-            "../../plugins/Geyser-Velocity/portal-session-status.json",
-            System.getProperty("user.home") + "/mc/plugins/Geyser-Velocity/portal-session-status.json",
-            System.getProperty("user.home") + "/mc/server/plugins/Geyser-Velocity/portal-session-status.json"
-        };
-
-        for (String candidate : candidates) {
+        for (String candidate : STATUS_FILE_CANDIDATES) {
             try {
                 Path path = Path.of(candidate).normalize();
                 if (!Files.isRegularFile(path)) {
