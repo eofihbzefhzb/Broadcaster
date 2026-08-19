@@ -227,15 +227,6 @@ public interface CoreConfig {
         @DefaultNumeric(120)
         @NumericRange(from = 0, to = Integer.MAX_VALUE)
         int discoveryTimeoutSeconds();
-
-        @Comment("""
-            Absolute (or working-directory-relative) path to Geyser's portal-session-status.json.
-            Only needed if MCXboxBroadcastStandalone.jar is NOT located next to (or one/two folders
-            above) the server's plugins/Geyser-Velocity folder, so the built-in relative-path guesses
-            can't find it - e.g. when the jar lives in its own separate folder like on Windows.
-            Leave empty to use the default relative-path guesses.""")
-        @DefaultString("")
-        String statusFilePath();
     }
 
     @ConfigSerializable
