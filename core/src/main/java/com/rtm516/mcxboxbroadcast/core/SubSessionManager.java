@@ -17,9 +17,11 @@ import java.net.http.HttpResponse;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Session manager for a sub-session.
@@ -33,6 +35,8 @@ public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
     private final int shardNumber;
     private final Map<String, String> nonces = new HashMap<>();
+    private int lastKnownPlayers = -1;
+    private String lastKnownWorld = "";
 
     /**
      * Create a new session manager for a sub-session
@@ -83,6 +87,22 @@ public class SubSessionManager extends SessionManagerCore {
     public void init() throws SessionCreationException, SessionUpdateException {
         this.sessionInfo = new ExpandedSessionInfo("", "", buildShardSessionInfo());
         super.init();
+
+        // Surveillance automatique : dès que le parent change (joueurs/monde), la sous-session se sync instantanément
+        scheduledThread().scheduleWithFixedDelay(() -> {
+            try {
+                ExpandedSessionInfo parentInfo = parent.sessionInfo();
+                if (parentInfo != null) {
+                    if (parentInfo.getPlayers() != lastKnownPlayers || !Objects.equals(parentInfo.getWorldName(), lastKnownWorld)) {
+                        lastKnownPlayers = parentInfo.getPlayers();
+                        lastKnownWorld = parentInfo.getWorldName();
+                        syncFromParent();
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Failed to sync sub-session from parent", e);
+            }
+        }, 3, 3, TimeUnit.SECONDS);
     }
 
     /**
@@ -94,7 +114,7 @@ public class SubSessionManager extends SessionManagerCore {
     public void syncFromParent() throws SessionUpdateException {
         this.sessionInfo.updateSessionInfo(buildShardSessionInfo());
         
-        // Log de debug pour vérifier la synchro si le mode debug est actif dans config.yml
+        // Log de debug : s'affichera dans la console si debug-mode: true
         logger.debug("Sub-session synced -> Nom: " + sessionInfo.getHostName() + 
                      " | Joueurs: " + sessionInfo.getPlayers() + "/" + sessionInfo.getMaxPlayers() + 
                      " | NetherNet ID: " + sessionInfo.getExternalNetherNetId());
