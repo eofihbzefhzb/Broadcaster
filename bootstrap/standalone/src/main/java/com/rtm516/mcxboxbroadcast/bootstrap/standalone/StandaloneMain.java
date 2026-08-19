@@ -474,40 +474,59 @@ public class StandaloneMain {
      * and contains all shard IDs in one place.
      */
     private static String discoverStatusNetworkId(int subseason) {
+        String configuredPath = config.netherNet().statusFilePath();
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            String result = readStatusNetworkIdFromCandidate(configuredPath.trim(), subseason);
+            if (!result.isBlank()) {
+                return result;
+            }
+            // Configured path takes priority but falls through to the relative
+            // guesses below in case the path is temporarily unavailable.
+        }
+
         for (String candidate : STATUS_FILE_CANDIDATES) {
-            try {
-                Path path = Path.of(candidate).normalize();
-                if (!Files.isRegularFile(path)) {
-                    continue;
-                }
+            String result = readStatusNetworkIdFromCandidate(candidate, subseason);
+            if (!result.isBlank()) {
+                return result;
+            }
+        }
 
-                JsonObject root = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
-                if (!isReadyStatus(root)) {
-                    logger.warn("Geyser NetherNet status is not ready in " + path);
-                    continue;
-                }
-                if (subseason > 0 && root.has("netherNetIds") && root.get("netherNetIds").isJsonArray()) {
-                    var ids = root.getAsJsonArray("netherNetIds");
-                    int shardIndex = subseason - 1;
-                    if (shardIndex >= 0 && shardIndex < ids.size()) {
-                        String networkId = ids.get(shardIndex).getAsString().replaceAll("[^0-9]", "");
-                        if (!networkId.isBlank()) {
-                            logger.info("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
-                            return networkId;
-                        }
-                    }
-                }
+        return "";
+    }
 
-                if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
-                    String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
+    private static String readStatusNetworkIdFromCandidate(String candidate, int subseason) {
+        try {
+            Path path = Path.of(candidate).normalize();
+            if (!Files.isRegularFile(path)) {
+                return "";
+            }
+
+            JsonObject root = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+            if (!isReadyStatus(root)) {
+                logger.warn("Geyser NetherNet status is not ready in " + path);
+                return "";
+            }
+            if (subseason > 0 && root.has("netherNetIds") && root.get("netherNetIds").isJsonArray()) {
+                var ids = root.getAsJsonArray("netherNetIds");
+                int shardIndex = subseason - 1;
+                if (shardIndex >= 0 && shardIndex < ids.size()) {
+                    String networkId = ids.get(shardIndex).getAsString().replaceAll("[^0-9]", "");
                     if (!networkId.isBlank()) {
-                        logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
+                        logger.info("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
                         return networkId;
                     }
                 }
-            } catch (Exception ignored) {
-                // Geyser may be writing the file at the same time; try again on the next poll.
             }
+
+            if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
+                String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
+                if (!networkId.isBlank()) {
+                    logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
+                    return networkId;
+                }
+            }
+        } catch (Exception ignored) {
+            // Geyser may be writing the file at the same time; try again on the next poll.
         }
 
         return "";
