@@ -68,7 +68,7 @@ public class SubSessionManager extends SessionManagerCore {
     }
 
     /**
-     * The NetherNet portal-bridge shard number this sub-session uses, and the "(&lt;n&gt;)"
+     * The NetherNet portal-bridge shard number this sub-session uses, and the "(<n>)"
      * suffix on its advertised secondary MOTD.
      *
      * @return The shard number (2 or greater)
@@ -101,9 +101,7 @@ public class SubSessionManager extends SessionManagerCore {
 
     /**
      * Build the SessionInfo this sub-session should advertise - a copy of the parent's current
-     * session, but with its own shard's NetherNet id (when externally hosted) and "(&lt;n&gt;)"
-     * appended to the host name so it's distinguishable from the primary and other sub-sessions
-     * in the Xbox session list.
+     * session, but with its own shard's NetherNet id (when externally hosted).
      */
     private SessionInfo buildShardSessionInfo() {
         ExpandedSessionInfo parentInfo = parent.sessionInfo();
@@ -126,8 +124,9 @@ public class SubSessionManager extends SessionManagerCore {
         if (baseHostName == null || baseHostName.isBlank()) {
             baseHostName = "MCXboxBroadcast";
         }
-        String suffix = " (" + shardNumber + ")";
-        shardInfo.setHostName(baseHostName.endsWith(suffix) ? baseHostName : baseHostName + suffix);
+        
+        // Modification ici : on assigne directement le nom de base sans ajouter de suffixe " (2)"
+        shardInfo.setHostName(baseHostName);
 
         if (parentInfo.isExternalNetherNetHosted()) {
             shardInfo.setExternalNetherNetHosted(true);
@@ -140,8 +139,6 @@ public class SubSessionManager extends SessionManagerCore {
 
     @Override
     protected boolean handleFriendship() {
-        // TODO Some form of force flag just in case the master friends list is full
-
         // Add the main account
         boolean subAdd = friendManager().addIfRequired(parent.getXuid(), parent.getGamertag());
 
