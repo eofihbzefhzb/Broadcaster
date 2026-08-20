@@ -51,24 +51,32 @@ public class StandaloneMain {
 
     /**
      * Dynamically resolves candidate paths for the Geyser status file.
-     * Prioritizes user-defined JVM arguments and environment variables before falling back to common relative paths.
+     * Prioritizes user-defined config, JVM arguments, and environment variables before falling back to common relative paths.
      */
     private static Iterable<String> getStatusFileCandidates() {
         List<String> candidates = new ArrayList<>();
 
-        // 1. Check for a JVM argument: java -Dgeyser.status.file="/path/to/file.json" -jar Broadcaster.jar
+        // 1. Highest Priority: The path explicitly set in config.yml
+        if (config != null && config.netherNet() != null) {
+            String configPath = config.netherNet().statusFilePath();
+            if (configPath != null && !configPath.isBlank()) {
+                candidates.add(configPath);
+            }
+        }
+
+        // 2. Check for a JVM argument: java -Dgeyser.status.file="/path/to/file.json" -jar Broadcaster.jar
         String sysProp = System.getProperty("geyser.status.file");
         if (sysProp != null && !sysProp.isBlank()) {
             candidates.add(sysProp);
         }
 
-        // 2. Check for an Environment Variable
+        // 3. Check for an Environment Variable
         String envVar = System.getenv("GEYSER_STATUS_FILE");
         if (envVar != null && !envVar.isBlank()) {
             candidates.add(envVar);
         }
 
-        // 3. Fallback to common relative and home directory paths
+        // 4. Fallback to common relative and home directory paths
         candidates.addAll(Arrays.asList(
             "./portal-session-status.json",
             "../portal-session-status.json",

@@ -201,11 +201,17 @@ public interface CoreConfig {
 
         @Comment("""
             The externally hosted NetherNet network id to advertise in the Xbox session.
-            This must match the listener that actually accepts the NetherNet/WebRTC join.
-            Leave empty to auto-discover it from the Geyser fork's portal-session-status.json (or, when
-            subseason is set above 0, from the matching shard in the netherNetIds array of that same file).""")
+            This must match the listener that accepts the NetherNet/WebRTC join.
+            Leave empty to auto-discover it.""")
         @DefaultString("")
         String externalNetworkId();
+        
+        @Comment("""
+            The absolute path to the Geyser portal-session-status.json file.
+            If left empty, Broadcaster will attempt to guess the path relative to its own folder.
+            Example: "C:\\path\\to\\Velocity\\plugins\\Geyser-Velocity\\portal-session-status.json" """)
+        @DefaultString("")
+        String statusFilePath();
 
         @Comment("""
             The subseason number this broadcaster instance represents, when running several subseasons
