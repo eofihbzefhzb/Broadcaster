@@ -26,6 +26,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Simple manager to authenticate and create sessions on Xbox
+ */
 public class SessionManager extends SessionManagerCore {
     private final ScheduledExecutorService scheduledThreadPool;
     private final Map<String, SubSessionManager> subSessionManagers;
@@ -37,6 +40,13 @@ public class SessionManager extends SessionManagerCore {
 
     private Map<String, String> nonces;
 
+    /**
+     * Create an instance of SessionManager
+     *
+     * @param storageManager The storage manager to use for storing data
+     * @param notificationManager The notification manager to use for sending messages
+     * @param logger The logger to use for outputting messages
+     */
     public SessionManager(StorageManager storageManager, NotificationManager notificationManager, Logger logger) {
         super(storageManager, notificationManager, logger.prefixed("Primary Session"));
         this.scheduledThreadPool = Executors.newScheduledThreadPool(5, new NamedThreadFactory("MCXboxBroadcast Thread"));
@@ -54,14 +64,33 @@ public class SessionManager extends SessionManagerCore {
         return sessionInfo.getSessionId();
     }
 
+    /**
+     * Get the current session information
+     *
+     * @return The current session information
+     */
     public ExpandedSessionInfo sessionInfo() {
         return sessionInfo;
     }
 
+    /**
+     * Set the resolver used to look up the NetherNet network id for a given shard number
+     * (1 = primary, 2+ = sub-sessions). Used to give each sub-session its own NetherNet shard
+     * from the Geyser portal-bridge instead of sharing the primary's shard.
+     *
+     * @param resolver A function from shard number to NetherNet network id, or empty string if unresolved
+     */
     public void shardNetworkIdResolver(java.util.function.IntFunction<String> resolver) {
         this.shardNetworkIdResolver = resolver != null ? resolver : (shard -> "");
     }
 
+    /**
+     * Resolve the NetherNet network id for the given shard number, safely swallowing any
+     * resolver errors.
+     *
+     * @param shardNumber The shard number to resolve
+     * @return The NetherNet network id, or empty string if it couldn't be resolved
+     */
     public String resolveShardNetworkId(int shardNumber) {
         try {
             String resolved = shardNetworkIdResolver.apply(shardNumber);
@@ -72,7 +101,10 @@ public class SessionManager extends SessionManagerCore {
         }
     }
 
-    // --- CORRECTION: Rafraîchir aussi les sous-sessions avant d'attendre Geyser ---
+    /**
+     * Ensure the primary session AND all configured sub-sessions are authenticated
+     * and their cache files are fully refreshed BEFORE waiting for Geyser's NetherNet ID.
+     */
     @Override
     public void ensureAuthenticated() {
         super.ensureAuthenticated();
@@ -83,19 +115,29 @@ public class SessionManager extends SessionManagerCore {
                 for (int i = 0; i < subSessions.size(); i++) {
                     String subSession = subSessions.get(i);
                     int shardNumber = i + 2;
+                    logger.info("Refreshing Xbox authentication for sub-session " + subSession + "...");
                     SubSessionManager subManager = new SubSessionManager(subSession, shardNumber, this, storageManager().subSession(subSession), notificationManager(), logger);
                     subManager.ensureAuthenticated();
+                    logger.info("Sub-session " + subSession + " authentication is ready.");
                 }
             }
         } catch (IOException e) {
-            // Fichier non trouvé, pas de sous-sessions
+            // Pas de sous-sessions configurées
         } catch (Exception e) {
             logger.error("Failed to pre-authenticate sub-sessions", e);
         }
     }
-    // --------------------------------------------------------------------------------
 
+    /**
+     * Initialize the session manager with the given session information
+     *
+     * @param sessionInfo      The session information to use
+     * @param friendSyncConfig The friend sync configuration to use
+     * @throws SessionCreationException If the session failed to create either because it already exists or some other reason
+     * @throws SessionUpdateException   If the session data couldn't be set due to some issue
+     */
     public boolean init(SessionInfo sessionInfo, CoreConfig.FriendSyncConfig friendSyncConfig) throws SessionCreationException, SessionUpdateException {
+        // Set the internal session information based on the session info
         this.sessionInfo = new ExpandedSessionInfo("", "", sessionInfo);
         this.queryFriendsOnStartup = friendSyncConfig.autoFollow()
             || friendSyncConfig.autoUnfollow()
@@ -104,13 +146,16 @@ public class SessionManager extends SessionManagerCore {
 
         super.init();
 
+        // If we failed to initialize, don't continue with the rest of the setup
         if (!this.initialized) {
             return this.initialized;
         }
 
+        // Set up the auto friend sync
         this.friendSyncConfig = friendSyncConfig;
         friendManager().init(this.friendSyncConfig);
 
+        // Load sub-sessions from cache
         List<String> subSessions = new ArrayList<>();
         try {
             String subSessionsJson = storageManager().subSessions();
@@ -119,8 +164,11 @@ public class SessionManager extends SessionManagerCore {
             }
         } catch (IOException ignored) { }
 
+        // Create the sub-sessions in a new thread so we don't block the main thread
         List<String> finalSubSessions = subSessions;
         scheduledThreadPool.execute(() -> {
+            // Create the sub-session manager for each sub-session
+            // Shard 1 is reserved for the primary session, so sub-sessions start at shard 2
             for (int i = 0; i < finalSubSessions.size(); i++) {
                 String subSession = finalSubSessions.get(i);
                 int shardNumber = i + 2;
@@ -140,6 +188,7 @@ public class SessionManager extends SessionManagerCore {
 
     @Override
     protected boolean handleFriendship() {
+        // Don't do anything as we are the main session
         return false;
     }
 
@@ -148,6 +197,12 @@ public class SessionManager extends SessionManagerCore {
         return queryFriendsOnStartup;
     }
 
+    /**
+     * Update the current session with new information
+     *
+     * @param sessionInfo The information to update the session with
+     * @throws SessionUpdateException If the update failed
+     */
     public void updateSession(SessionInfo sessionInfo) throws SessionUpdateException {
         this.sessionInfo.updateSessionInfo(sessionInfo);
         updateSession();
@@ -155,6 +210,7 @@ public class SessionManager extends SessionManagerCore {
 
     @Override
     public void updateNonces() throws SessionUpdateException {
+        // Get session
         HttpRequest createSessionRequest = HttpRequest.newBuilder()
             .uri(URI.create(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId())))
             .header("Content-Type", "application/json")
@@ -172,16 +228,22 @@ public class SessionManager extends SessionManagerCore {
             }
 
             boolean hasChanges = false;
+
+            // Collect active XUIDs from the session
             Set<String> activeXuids = new HashSet<>();
             for (Map.Entry<String, SessionMember> entry : sessionResponse.members().entrySet()) {
                 activeXuids.add(entry.getValue().constants().get("system").xuid());
             }
 
+            // Remove our own xuid
             activeXuids.remove(sessionInfo.getXuid());
+
+            // Remove stale nonces
             hasChanges = nonces.keySet().retainAll(activeXuids);
 
             for (String xuid : activeXuids) {
                 if (!nonces.containsKey(xuid)) {
+                    // Generate a nonce
                     byte[] bytes = new byte[8];
                     ThreadLocalRandom.current().nextBytes(bytes);
                     StringBuilder hex = new StringBuilder(16);
@@ -189,12 +251,16 @@ public class SessionManager extends SessionManagerCore {
                         hex.append(String.format("%02x", b));
                     }
 
+                    // Put the nonce
                     nonces.put(xuid, hex.toString());
+
                     logger.debug("Generated nonce for XUID " + xuid + ": " + hex);
+
                     hasChanges = true;
                 }
             }
 
+            // Only update the session properties if something changed
             if (hasChanges) {
                 updateSession();
             }
@@ -205,10 +271,14 @@ public class SessionManager extends SessionManagerCore {
 
     @Override
     protected void updateSession() throws SessionUpdateException {
+        // Make sure the websocket connection is still active
         checkConnection();
+
         String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId()), new CreateSessionRequest(this.sessionInfo, nonces));
         try {
             CreateSessionResponse sessionResponse = Constants.GSON.fromJson(responseBody, CreateSessionResponse.class);
+
+            // Restart if we have 28/30 session members
             int players = sessionResponse.members().size();
             if (players >= 28) {
                 logger.info("Restarting session due to " + players + "/30 players");
@@ -219,14 +289,23 @@ public class SessionManager extends SessionManagerCore {
         }
     }
 
+    /**
+     * Stop the current session and close the websocket
+     */
     public void shutdown() {
+        // Shutdown all sub-sessions
         for (SubSessionManager subSessionManager : subSessionManagers.values()) {
             subSessionManager.shutdown();
         }
+
+        // Shutdown self
         super.shutdown();
         scheduledThreadPool.shutdownNow();
     }
 
+    /**
+     * Dump the current and last session responses to json files
+     */
     public void dumpSession() {
         try {
             storageManager().lastSessionResponse(lastSessionResponse);
@@ -244,18 +323,28 @@ public class SessionManager extends SessionManagerCore {
 
         try {
             HttpResponse<String> createSessionResponse = httpClient.send(createSessionRequest, HttpResponse.BodyHandlers.ofString());
+
             storageManager().currentSessionResponse(createSessionResponse.body());
         } catch (IOException | InterruptedException e) {
             logger.error("Error dumping current session: " + e.getMessage());
         }
     }
 
+    /**
+     * Create a sub-session for the given ID
+     *
+     * @param id The ID of the sub-session to create
+     */
     public void addSubSession(String id) {
+        // Make sure we don't already have that ID
         if (subSessionManagers.containsKey(id)) {
             coreLogger.error("Sub-session already exists with that ID");
             return;
         }
 
+        // Create the sub-session manager
+        // Shard 1 is reserved for the primary session; pick the next unused shard number so
+        // previously-removed sub-sessions' shard numbers are never reused while running
         int shardNumber = subSessionManagers.values().stream()
             .mapToInt(SubSessionManager::shardNumber)
             .max()
@@ -270,6 +359,7 @@ public class SessionManager extends SessionManagerCore {
             return;
         }
 
+        // Update the list of sub-sessions
         try {
             storageManager().subSessions(Constants.GSON.toJson(subSessionManagers.keySet()));
         } catch (JsonParseException | IOException e) {
@@ -277,21 +367,30 @@ public class SessionManager extends SessionManagerCore {
         }
     }
 
+    /**
+     * Remove a sub-session for the given ID
+     *
+     * @param id The ID of the sub-session to remove
+     */
     public void removeSubSession(String id) {
+        // Make sure we have that ID
         if (!subSessionManagers.containsKey(id)) {
             coreLogger.error("Sub-session does not exist with that ID");
             return;
         }
 
+        // Remove the sub-session manager
         subSessionManagers.get(id).shutdown();
         subSessionManagers.remove(id);
 
+        // Delete the sub-session cache file
         try {
             storageManager().subSession(id).cleanup();
         } catch (IOException e) {
             coreLogger.error("Failed to delete sub-session cache file", e);
         }
 
+        // Update the list of sub-sessions
         try {
             storageManager().subSessions(Constants.GSON.toJson(subSessionManagers.keySet()));
         } catch (JsonParseException | IOException e) {
@@ -301,6 +400,9 @@ public class SessionManager extends SessionManagerCore {
         coreLogger.info("Removed sub-session with ID " + id);
     }
 
+    /**
+     * List all sessions and their information
+     */
     public void listSessions() {
         List<String> messages = new ArrayList<>();
         coreLogger.info("Loading status of sessions...");
@@ -327,10 +429,18 @@ public class SessionManager extends SessionManagerCore {
         }
     }
 
+    /**
+     * Set the callback to run when the session manager needs to be restarted
+     *
+     * @param restart The callback to run
+     */
     public void restartCallback(Runnable restart) {
         this.restartCallback = restart;
     }
 
+    /**
+     * Restart the session manager
+     */
     public void restart() {
         if (restartCallback != null) {
             restartCallback.run();
