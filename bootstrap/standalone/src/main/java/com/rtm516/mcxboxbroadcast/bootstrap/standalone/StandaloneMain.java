@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
@@ -43,7 +44,7 @@ public class StandaloneMain {
     private static StandaloneBridgeService bridgeService;
     private static String discoveredExternalNetworkId;
 
-    // ANTI-SPAM LOG CACHE : Permet de mémoriser le dernier ID logué pour éviter le spam en boucle
+    // ANTI-SPAM LOG CACHE : Permet de m\u00e9moriser le dernier ID logu\u00e9 pour \u00e9viter le spam en boucle
     private static String lastLoggedPrimaryNetworkId = null;
     private static final Map<Integer, String> lastLoggedShardNetworkIds = new HashMap<>();
 
@@ -118,23 +119,39 @@ public class StandaloneMain {
         }
 
         discoveredExternalNetworkId = discoverExternalNetworkId();
-        if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
-            discoveredExternalNetworkId = waitForExternalNetworkId();
-        }
-        logMode();
-
+        
         sessionInfo = new SessionInfo(config.session().sessionInfo());
         applySessionSettings(sessionInfo);
 
+        // -- FIX START --
+        // Run the blocking wait logic asynchronously so the main thread can finish
+        // and the auth cache can be persisted successfully.
         if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
-            logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
-            logger.error("Restart Paper/Geyser once so the updated Geyser fork can start NetherNet ingress and write portal-session-status.json, then start MCXboxBroadcast again.");
-            if (sessionManager != null) {
-                sessionManager.shutdown();
-                sessionManager = null;
-            }
-            return;
+            CompletableFuture.runAsync(() -> {
+                discoveredExternalNetworkId = waitForExternalNetworkId();
+                if (discoveredExternalNetworkId.isBlank()) {
+                    logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
+                    logger.error("Restart Paper/Geyser once so the updated Geyser fork can start NetherNet ingress and write portal-session-status.json, then start MCXboxBroadcast again.");
+                    if (sessionManager != null) {
+                        sessionManager.shutdown();
+                        sessionManager = null;
+                    }
+                    System.exit(1); // Exit asynchronously if failed
+                } else {
+                    applySessionSettings(sessionInfo);
+                    continueInitialization();
+                }
+            });
+        } else {
+            continueInitialization();
         }
+        // -- FIX END --
+
+        logger.start();
+    }
+
+    private static void continueInitialization() {
+        logMode();
 
         if (isLocalBridgeEnabled()) {
             bridgeService = new StandaloneBridgeService(config, logger.prefixed("bridge"), () -> sessionInfo);
@@ -161,12 +178,14 @@ public class StandaloneMain {
 
             updateSessionInfo(sessionInfo);
 
-            createSession();
+            try {
+                createSession();
+            } catch (Exception e) {
+                logger.error("Failed to create session asynchronously", e);
+            }
         } else {
             logger.info("Xbox session publishing is disabled in config.yml");
         }
-
-        logger.start();
     }
 
     public static void restart() {
