@@ -44,7 +44,7 @@ public class StandaloneMain {
     private static StandaloneBridgeService bridgeService;
     private static String discoveredExternalNetworkId;
 
-    // ANTI-SPAM LOG CACHE : Permet de m\u00e9moriser le dernier ID logu\u00e9 pour \u00e9viter le spam en boucle
+    // ANTI-SPAM LOG CACHE : Permet de mémosier le dernier ID logué pour éviter le spam en boucle
     private static String lastLoggedPrimaryNetworkId = null;
     private static final Map<Integer, String> lastLoggedShardNetworkIds = new HashMap<>();
 
@@ -128,7 +128,11 @@ public class StandaloneMain {
         // and the auth cache can be persisted successfully.
         if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
             CompletableFuture.runAsync(() -> {
-                discoveredExternalNetworkId = waitForExternalNetworkId();
+                // If it's already discovered, skip waiting
+                if (discoveredExternalNetworkId.isBlank()) {
+                    discoveredExternalNetworkId = waitForExternalNetworkId();
+                }
+
                 if (discoveredExternalNetworkId.isBlank()) {
                     logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
                     logger.error("Restart Paper/Geyser once so the updated Geyser fork can start NetherNet ingress and write portal-session-status.json, then start MCXboxBroadcast again.");
@@ -437,7 +441,8 @@ public class StandaloneMain {
             return fileDiscoveredId;
         }
 
-        logger.warn("external-hosted is enabled but no NetherNet network ID is configured and none was auto-discovered from the local Geyser ID file.");
+        // SUPPRIMÉ : L'avertissement répétitif dans la boucle de démarrage
+        // logger.warn("external-hosted is enabled but no NetherNet network ID is configured and none was auto-discovered from the local Geyser ID file.");
         return "";
     }
 
