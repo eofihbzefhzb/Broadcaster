@@ -149,8 +149,12 @@ public interface CoreConfig {
 
     @ConfigSerializable
     interface XboxSessionConfig {
-        @Comment("Who can see and join the session. Common values: joinable_by_friends, joinable_by_friends_of_friends")
-        @DefaultString("joinable_by_friends")
+        @Comment("""
+            Who can see and join the session.
+            joinable_by_friends_of_friends reaches the widest audience: anyone who is a friend of any
+            account in the session can join, without being your friend directly.
+            Use joinable_by_friends to restrict joining to your own friends only.""")
+        @DefaultString("joinable_by_friends_of_friends")
         String joinability();
 
         @Comment("The world type shown in the Xbox session")

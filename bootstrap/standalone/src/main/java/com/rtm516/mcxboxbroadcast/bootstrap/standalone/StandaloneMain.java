@@ -33,7 +33,6 @@ import java.util.concurrent.CompletableFuture;
 
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
-    private static final String REQUIRED_JOINABILITY = "joinable_by_friends";
     
     private static CoreConfig config;
     private static StandaloneLoggerImpl logger;
@@ -328,7 +327,13 @@ public class StandaloneMain {
     }
 
     private static void applySessionSettings(SessionInfo sessionInfo) {
-        sessionInfo.setJoinability(REQUIRED_JOINABILITY);
+        // Read from config like every other setting below. This was previously pinned to
+        // "joinable_by_friends" by a REQUIRED_JOINABILITY constant, which silently overrode
+        // whatever the config asked for.
+        String joinability = config.xboxSession().joinability();
+        sessionInfo.setJoinability(joinability == null || joinability.isBlank()
+            ? "joinable_by_friends_of_friends"
+            : joinability);
         sessionInfo.setWorldType(config.xboxSession().worldType());
         sessionInfo.setEditorWorld(config.xboxSession().editorWorld());
         sessionInfo.setHardcore(config.xboxSession().hardcore());
