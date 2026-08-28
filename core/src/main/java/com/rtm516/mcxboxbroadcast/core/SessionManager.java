@@ -138,7 +138,6 @@ public class SessionManager extends SessionManagerCore {
         List<String> finalSubSessions = subSessions;
         scheduledThreadPool.execute(() -> {
             // Create the sub-session manager for each sub-session
-            // Shard 1 is reserved for the primary session, so sub-sessions start at shard 2
             for (int i = 0; i < finalSubSessions.size(); i++) {
                 String subSession = finalSubSessions.get(i);
 
@@ -373,7 +372,6 @@ public class SessionManager extends SessionManagerCore {
 
         messages.add("Primary Session:");
         messages.add(" - Gamertag: " + getGamertag());
-        messages.add("   Shard: 1");
         messages.add("   Following: " + socialSummary().targetFollowingCount() + "/" + Constants.MAX_FRIENDS);
 
         if (!subSessionManagers.isEmpty()) {

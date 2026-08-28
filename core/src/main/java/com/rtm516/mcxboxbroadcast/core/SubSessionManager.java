@@ -85,13 +85,22 @@ public class SubSessionManager extends SessionManagerCore {
      * Minimal SessionInfo for this account.
      * <p>
      * A member's {@link JoinSessionRequest} carries only {@code members.me}, built from the xuid and
-     * connection id. The world name, player counts, host name and NetherNet id that used to be copied
-     * from the parent here were never transmitted once sub-sessions stopped publishing their own
-     * session, so mirroring them was pure overhead - and the NetherNet id in particular came from the
-     * old per-shard resolver, which no longer has anything to resolve.
+     * connection id, so the world/player/NetherNet fields that used to be mirrored from the parent
+     * here are never transmitted any more.
+     * <p>
+     * Host and world name are still filled in: {@link ExpandedSessionInfo}'s constructor calls
+     * {@code getHostName().isEmpty()} and {@code getWorldName().isEmpty()} without a null check, so
+     * leaving them unset throws before this object is ever used.
      */
     private SessionInfo buildShardSessionInfo() {
-        return new SessionInfo();
+        ExpandedSessionInfo parentInfo = parent.sessionInfo();
+
+        SessionInfo shardInfo = new SessionInfo();
+        String hostName = parentInfo != null ? parentInfo.getHostName() : null;
+        shardInfo.setHostName(hostName == null || hostName.isBlank() ? "MCXboxBroadcast" : hostName);
+        String worldName = parentInfo != null ? parentInfo.getWorldName() : null;
+        shardInfo.setWorldName(worldName == null || worldName.isBlank() ? shardInfo.getHostName() : worldName);
+        return shardInfo;
     }
 
     @Override
