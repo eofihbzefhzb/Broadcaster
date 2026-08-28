@@ -26,9 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CompletableFuture;
@@ -46,7 +44,6 @@ public class StandaloneMain {
 
     // ANTI-SPAM LOG CACHE : Permet de mémosier le dernier ID logué pour éviter le spam en boucle
     private static String lastLoggedPrimaryNetworkId = null;
-    private static final Map<Integer, String> lastLoggedShardNetworkIds = new HashMap<>();
 
     public static SessionManager sessionManager;
 
@@ -112,7 +109,6 @@ public class StandaloneMain {
         if (config.enabled()) {
             sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
             sessionManager.setNetherNetPortRange(config.session().icePortRange().min(), config.session().icePortRange().max());
-            sessionManager.shardNetworkIdResolver(StandaloneMain::discoverShardNetworkId);
             logger.info("Refreshing Xbox authentication before NetherNet discovery...");
             sessionManager.ensureAuthenticated();
             logger.info("Xbox authentication is ready for NetherNet signaling.");
@@ -203,7 +199,6 @@ public class StandaloneMain {
 
             sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
             sessionManager.setNetherNetPortRange(config.session().icePortRange().min(), config.session().icePortRange().max());
-            sessionManager.shardNetworkIdResolver(StandaloneMain::discoverShardNetworkId);
 
             createSession();
         } catch (SessionCreationException | SessionUpdateException e) {
@@ -520,24 +515,6 @@ public class StandaloneMain {
                     logger.warn("Geyser NetherNet status is not ready in " + path);
                     continue;
                 }
-                if (subseason > 0 && root.has("netherNetIds") && root.get("netherNetIds").isJsonArray()) {
-                    var ids = root.getAsJsonArray("netherNetIds");
-                    int shardIndex = subseason - 1;
-                    if (shardIndex >= 0 && shardIndex < ids.size()) {
-                        String networkId = ids.get(shardIndex).getAsString().replaceAll("[^0-9]", "");
-                        if (!networkId.isBlank()) {
-                            // ANTI-SPAM LOG : Log en INFO uniquement si l'ID du shard change, sinon debug discret
-                            if (!networkId.equals(lastLoggedShardNetworkIds.get(subseason))) {
-                                logger.info("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
-                                lastLoggedShardNetworkIds.put(subseason, networkId);
-                            } else {
-                                logger.debug("Discovered NetherNet shard #" + subseason + " network ID " + networkId + " from " + path);
-                            }
-                            return networkId;
-                        }
-                    }
-                }
-
                 if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
                     String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
                     if (!networkId.isBlank()) {
@@ -577,12 +554,4 @@ public class StandaloneMain {
         }
     }
 
-    private static String discoverShardNetworkId(int subseason) {
-        String readyStatusNetworkId = discoverStatusNetworkId(subseason);
-        if (!readyStatusNetworkId.isBlank()) {
-            return readyStatusNetworkId;
-        }
-
-        return "";
-    }
 }

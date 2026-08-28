@@ -27,24 +27,20 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
-    private final int shardNumber;
     private final Map<String, String> nonces = new HashMap<>();
 
     /**
      * Create a new session manager for a sub-session
      *
      * @param id The id of the sub-session
-     * @param shardNumber The NetherNet portal-bridge shard number this sub-session uses (1 is
-     *                     reserved for the primary session, so this is always 2 or greater).
      * @param parent The parent session manager
      * @param storageManager The storage manager to use for storing data
      * @param notificationManager The notification manager to use for sending messages
      * @param logger The logger to use for outputting messages
      */
-    public SubSessionManager(String id, int shardNumber, SessionManager parent, StorageManager storageManager, NotificationManager notificationManager, Logger logger) {
+    public SubSessionManager(String id, SessionManager parent, StorageManager storageManager, NotificationManager notificationManager, Logger logger) {
         super(storageManager, notificationManager, logger.prefixed("Sub-Session " + id));
         this.parent = parent;
-        this.shardNumber = shardNumber;
     }
 
     @Override
@@ -70,14 +66,6 @@ public class SubSessionManager extends SessionManagerCore {
         return parent.getSessionId();
     }
 
-    /**
-     * The NetherNet portal-bridge shard number this sub-session uses.
-     *
-     * @return The shard number (2 or greater)
-     */
-    public int shardNumber() {
-        return shardNumber;
-    }
 
     /**
      * Joins the primary session and starts advertising this account's presence in it.
@@ -94,41 +82,16 @@ public class SubSessionManager extends SessionManagerCore {
     }
 
     /**
-     * Build the SessionInfo this sub-session should advertise - a copy of the parent's current
-     * session, but with its own shard's NetherNet id (when externally hosted).
+     * Minimal SessionInfo for this account.
+     * <p>
+     * A member's {@link JoinSessionRequest} carries only {@code members.me}, built from the xuid and
+     * connection id. The world name, player counts, host name and NetherNet id that used to be copied
+     * from the parent here were never transmitted once sub-sessions stopped publishing their own
+     * session, so mirroring them was pure overhead - and the NetherNet id in particular came from the
+     * old per-shard resolver, which no longer has anything to resolve.
      */
     private SessionInfo buildShardSessionInfo() {
-        ExpandedSessionInfo parentInfo = parent.sessionInfo();
-
-        SessionInfo shardInfo = new SessionInfo();
-        shardInfo.setWorldName(parentInfo.getWorldName());
-        shardInfo.setPlayers(parentInfo.getPlayers());
-        shardInfo.setMaxPlayers(parentInfo.getMaxPlayers());
-        shardInfo.setIp(parentInfo.getIp());
-        shardInfo.setPort(parentInfo.getPort());
-        shardInfo.setJoinability(parentInfo.getJoinability());
-        shardInfo.setWorldType(parentInfo.getWorldType());
-        shardInfo.setEditorWorld(parentInfo.isEditorWorld());
-        shardInfo.setHardcore(parentInfo.isHardcore());
-        shardInfo.setProxyBridgeEnabled(parentInfo.isProxyBridgeEnabled());
-        shardInfo.setRelayTargetAddress(parentInfo.getRelayTargetAddress());
-        shardInfo.setRelayTargetPort(parentInfo.getRelayTargetPort());
-
-        String baseHostName = parentInfo.getHostName();
-        if (baseHostName == null || baseHostName.isBlank()) {
-            baseHostName = "MCXboxBroadcast";
-        }
-        
-        // Garde le même nom propre sans suffixe numérique
-        shardInfo.setHostName(baseHostName);
-
-        if (parentInfo.isExternalNetherNetHosted()) {
-            shardInfo.setExternalNetherNetHosted(true);
-            String shardNetworkId = parent.resolveShardNetworkId(shardNumber);
-            shardInfo.setExternalNetherNetId(!shardNetworkId.isBlank() ? shardNetworkId : parentInfo.getExternalNetherNetId());
-        }
-
-        return shardInfo;
+        return new SessionInfo();
     }
 
     @Override
