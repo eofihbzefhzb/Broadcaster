@@ -3,40 +3,32 @@ package com.rtm516.mcxboxbroadcast.core;
 import com.google.gson.JsonParseException;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionCreationException;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionUpdateException;
-import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionRequest;
+import com.rtm516.mcxboxbroadcast.core.models.session.JoinSessionRequest;
 import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionResponse;
-import com.rtm516.mcxboxbroadcast.core.models.session.member.SessionMember;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
 import dev.kastle.webrtc.PortAllocatorConfig;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Session manager for a sub-session.
  * <p>
- * Each sub-session is its own independently published Xbox session with its own NetherNet shard
- * (resolved via the parent's shard network id resolver), relaying into the same backend server as
- * the primary session. This spreads join/NetherNet capacity across multiple Xbox accounts/shards
- * while sub-sessions still friend the primary account to help scale past the 2000-friend cap.
+ * A sub-session does NOT publish a session of its own. It joins the primary session as a member and
+ * points its Xbox "activity" handle at the primary session, so Minecraft shows the sub-account as
+ * playing inside the primary account's world rather than hosting a separate one. Someone opening the
+ * sub-account's Xbox profile therefore sees the primary world and can join through it.
+ * <p>
+ * Sub-accounts still exist to scale past the 2000-friend cap: each one carries its own friends list
+ * and funnels those players into the single session the primary account hosts. Because there is only
+ * one session, there is only one NetherNet ingress - the Geyser side should run a single shard.
  */
 public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
     private final int shardNumber;
     private final Map<String, String> nonces = new HashMap<>();
-    private int lastKnownPlayers = -1;
-    private String lastKnownWorld = "";
 
     /**
      * Create a new session manager for a sub-session
@@ -65,9 +57,17 @@ public class SubSessionManager extends SessionManagerCore {
         return parent.netherNetPortAllocatorConfig();
     }
 
+    /**
+     * The primary session's id, not this account's own.
+     * <p>
+     * This is what makes the whole thing work: {@code createSessionHandle()} in the base class builds
+     * the "activity" handle from this value, so the sub-account's Xbox presence points at the primary
+     * session. Returning a private id here is what previously made each sub-account look like the host
+     * of its own separate world.
+     */
     @Override
     public String getSessionId() {
-        return sessionInfo.getSessionId();
+        return parent.getSessionId();
     }
 
     /**
@@ -80,46 +80,17 @@ public class SubSessionManager extends SessionManagerCore {
     }
 
     /**
-     * Initialize this sub-session as its own independently published Xbox session, using its
-     * own NetherNet shard and relaying into the same backend server as the parent.
+     * Joins the primary session and starts advertising this account's presence in it.
+     * <p>
+     * The periodic "sync from parent" loop that used to live here is gone: it existed to copy the
+     * parent's world name and player counts into this account's own advertisement, and there is no
+     * separate advertisement any more. The primary session is the single source of truth, so there
+     * is nothing left to mirror.
      */
     @Override
     public void init() throws SessionCreationException, SessionUpdateException {
         this.sessionInfo = new ExpandedSessionInfo("", "", buildShardSessionInfo());
         super.init();
-
-        // Surveillance automatique : dès que le parent change (joueurs/monde), la sous-session se sync instantanément
-        scheduledThread().scheduleWithFixedDelay(() -> {
-            try {
-                ExpandedSessionInfo parentInfo = parent.sessionInfo();
-                if (parentInfo != null) {
-                    if (parentInfo.getPlayers() != lastKnownPlayers || !Objects.equals(parentInfo.getWorldName(), lastKnownWorld)) {
-                        lastKnownPlayers = parentInfo.getPlayers();
-                        lastKnownWorld = parentInfo.getWorldName();
-                        syncFromParent();
-                    }
-                }
-            } catch (Exception e) {
-                logger.error("Failed to sync sub-session from parent", e);
-            }
-        }, 3, 3, TimeUnit.SECONDS);
-    }
-
-    /**
-     * Refresh this sub-session's advertised state (players, max players, etc.) from the parent's
-     * current session info, keeping this shard's own host name and NetherNet id.
-     *
-     * @throws SessionUpdateException If the update fails
-     */
-    public void syncFromParent() throws SessionUpdateException {
-        this.sessionInfo.updateSessionInfo(buildShardSessionInfo());
-        
-        // Log de debug : s'affichera dans la console si debug-mode: true
-        logger.debug("Sub-session synced -> Nom: " + sessionInfo.getHostName() + 
-                     " | Joueurs: " + sessionInfo.getPlayers() + "/" + sessionInfo.getMaxPlayers() + 
-                     " | NetherNet ID: " + sessionInfo.getExternalNetherNetId());
-
-        updateSession();
     }
 
     /**
@@ -172,65 +143,28 @@ public class SubSessionManager extends SessionManagerCore {
     }
 
     /**
-     * Generate join nonces for this sub-session's own session members - mirrors the primary
-     * session's nonce handling since this sub-session now hosts its own real, joinable session.
+     * No-op: nonces belong to whoever hosts the session, and that is the primary account now.
+     * <p>
+     * A member issuing nonces for a session it does not own would fight the host's own bookkeeping.
      */
     @Override
     public void updateNonces() throws SessionUpdateException {
-        HttpRequest getSessionRequest = HttpRequest.newBuilder()
-            .uri(URI.create(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId())))
-            .header("Content-Type", "application/json")
-            .header("Authorization", getTokenHeader())
-            .header("x-xbl-contract-version", "107")
-            .GET()
-            .build();
-
-        try {
-            HttpResponse<String> getSessionResponse = httpClient.send(getSessionRequest, HttpResponse.BodyHandlers.ofString());
-            CreateSessionResponse sessionResponse = Constants.GSON.fromJson(getSessionResponse.body(), CreateSessionResponse.class);
-
-            if (sessionResponse == null) {
-                throw new SessionUpdateException("Failed to get session for nonces, joining will not work: sessionResponse is null");
-            }
-
-            boolean hasChanges;
-
-            Set<String> activeXuids = new HashSet<>();
-            for (Map.Entry<String, SessionMember> entry : sessionResponse.members().entrySet()) {
-                activeXuids.add(entry.getValue().constants().get("system").xuid());
-            }
-
-            activeXuids.remove(sessionInfo.getXuid());
-
-            hasChanges = nonces.keySet().retainAll(activeXuids);
-
-            for (String xuid : activeXuids) {
-                if (!nonces.containsKey(xuid)) {
-                    byte[] bytes = new byte[8];
-                    ThreadLocalRandom.current().nextBytes(bytes);
-                    StringBuilder hex = new StringBuilder(16);
-                    for (byte b : bytes) {
-                        hex.append(String.format("%02x", b));
-                    }
-
-                    nonces.put(xuid, hex.toString());
-                    hasChanges = true;
-                }
-            }
-
-            if (hasChanges) {
-                updateSession();
-            }
-        } catch (IOException | InterruptedException e) {
-            throw new SessionUpdateException("Failed to get session for nonces, joining will not work: " + e.getMessage());
-        }
+        // Intentionally empty - see javadoc.
     }
 
+    /**
+     * Registers this account as a member of the primary session.
+     * <p>
+     * Sends a {@link JoinSessionRequest} (a {@code members.me} block only) to the PRIMARY session id.
+     * It must not send a {@link CreateSessionRequest}: that carries the session properties - host
+     * name, world, player counts, the NetherNet connection - and posting those to the primary session
+     * id would have each sub-account overwrite the host's own advertisement several times a minute.
+     */
     @Override
     protected void updateSession() throws SessionUpdateException {
         checkConnection();
 
-        String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId()), new CreateSessionRequest(this.sessionInfo, nonces));
+        String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(parent.getSessionId()), new JoinSessionRequest(this.sessionInfo));
         try {
             // Just confirm the response parses; unlike the primary session we don't restart on
             // high player counts here - the primary session already handles that for the shared backend
