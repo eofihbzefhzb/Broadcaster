@@ -444,7 +444,14 @@ public abstract class SessionManagerCore {
                 return createSessionResponse.body();
             }
 
-            lastFailure = "Unable to update session information, got status " + createSessionResponse.statusCode();
+            // Xbox always explains a 4xx in the response body (which property it rejected and why).
+            // Only the status code used to be kept, which turned every rejection into an opaque
+            // "got status 400" with nothing to act on.
+            String failureBody = createSessionResponse.body();
+            lastFailure = "Unable to update session information, got status " + createSessionResponse.statusCode()
+                + (failureBody == null || failureBody.isBlank()
+                    ? ""
+                    : ": " + (failureBody.length() > 500 ? failureBody.substring(0, 500) + "..." : failureBody));
             if (createSessionResponse.statusCode() == 429 || createSessionResponse.statusCode() >= 500) {
                 if (attempt < 3) {
                     int retryAfter = createSessionResponse.headers().firstValue("Retry-After")
