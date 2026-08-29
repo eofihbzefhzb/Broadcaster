@@ -495,25 +495,15 @@ public class StandaloneMain {
         }
     }
 
+    /**
+     * There is a single NetherNet id to discover. The subseason used to select one shard out of
+     * several here; Geyser publishes one ingress now, so both branches did the same thing.
+     */
     private static String discoverExternalNetworkIdFromFile() {
-        int subseason = config.netherNet().subseason();
-        if (subseason > 0) {
-            String statusNetworkId = discoverStatusNetworkId(subseason);
-            if (!statusNetworkId.isBlank()) {
-                return statusNetworkId;
-            }
-            logger.warn("Subseason " + subseason + " is configured, but no matching ready shard was found in the Geyser status files.");
-        } else {
-            String statusNetworkId = discoverStatusNetworkId(0);
-            if (!statusNetworkId.isBlank()) {
-                return statusNetworkId;
-            }
-        }
-
-        return "";
+        return discoverStatusNetworkId();
     }
 
-    private static String discoverStatusNetworkId(int subseason) {
+    private static String discoverStatusNetworkId() {
         for (String candidate : getStatusFileCandidates()) {
             try {
                 Path path = Path.of(candidate).normalize();

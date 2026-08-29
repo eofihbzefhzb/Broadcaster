@@ -238,14 +238,11 @@ public interface CoreConfig {
         String statusFilePath();
 
         @Comment("""
-            The subseason number this broadcaster instance represents, when running several subseasons
-            off a single Geyser instance whose portal-bridge.shard-count is greater than 1.
-            When set above 0:
-              - the NetherNet network id is auto-discovered from shard #<subseason> in the netherNetIds
-                array of portal-session-status.json instead of the single netherNetId field
-              - the advertised secondary MOTD (host-name) has " (<subseason>)" appended, so each
-                subseason's Xbox session is distinguishable
-            Leave at 0 to use the legacy single-shard behaviour.""")
+            Optional label for running several broadcaster instances against separate backends.
+            When set above 0 the advertised secondary MOTD (host-name) gets " (<subseason>)" appended
+            so each instance's Xbox session is distinguishable in the friends list.
+            It no longer selects a NetherNet shard: Geyser publishes a single ingress, and every
+            instance discovers that same id. Leave at 0 for a normal single-server setup.""")
         @DefaultNumeric(0)
         @NumericRange(from = 0, to = Integer.MAX_VALUE)
         int subseason();

@@ -72,7 +72,6 @@ advanced:
       enabled: true
       xbox-auth-header-file: /absolute/path/to/stack/mcxbox-standalone/cache/cache.json
       nether-net-network-id: ''
-      shard-count: 1
       debug-logging: false
 ```
 
@@ -91,6 +90,16 @@ nether-net:
   external-network-id: ''
   discovery-timeout-seconds: 120
 
+xbox-session:
+  # Keep joinable_by_friends. Other values (including joinable_by_friends_of_friends) break
+  # joining: the client connects, completes the Bedrock handshake, then stops responding.
+  joinability: joinable_by_friends
+  # Xbox MPSD gates, applied before Minecraft reads the joinability label above.
+  # This pair - not joinability - is what controls whether people outside your accounts'
+  # follower lists can see and join the world.
+  read-restriction: none
+  join-restriction: none
+
 friend-sync:
   auto-follow: false
   auto-unfollow: false
@@ -99,13 +108,25 @@ friend-sync:
     enabled: false
 ```
 
-For a clean startup, run MCXboxBroadcast first, then start Paper/Geyser. The
-publisher refreshes the Xbox authentication cache and waits; Geyser can then
-bind its NetherNet signaling channel with the fresh header and write a ready
-`portal-session-status.json`. MCXboxBroadcast discovers that file, verifies
-the NetherNet ID, and publishes the Xbox session with the ID and `PmsgId`
-supplied by the session service. No ID copying is required. If the cache is
-known to be fresh, Paper/Geyser may also be started first.
+Startup order does not matter. Geyser retries its NetherNet bind every 10 seconds
+until the Xbox auth source is usable and waits up to 60 seconds for the cache file
+to appear; the publisher in turn waits for a ready `portal-session-status.json`
+before publishing. Whichever starts first waits for the other. No ID copying is
+required.
+
+### Session visibility
+
+Sub-accounts do not publish sessions of their own. They join the primary account's
+session as members and point their Xbox activity handle at it, so a player browsing
+a sub-account's profile sees the primary world and joins through it. Each sub-account
+carries its own friends list, which is how the setup scales past the 2000-friend cap
+on a single account.
+
+Who can see and join is decided by `read-restriction` / `join-restriction` above, not
+by `joinability`. With both set to `none`, players outside your accounts' follower
+lists can see and join. Setting `join-restriction: followed` while leaving
+`read-restriction: none` lets people see the world but requires them to friend one of
+your accounts before they can join.
 
 The standalone console provides two safe operational commands:
 
