@@ -150,12 +150,32 @@ public interface CoreConfig {
     @ConfigSerializable
     interface XboxSessionConfig {
         @Comment("""
-            Who can see and join the session.
-            joinable_by_friends_of_friends reaches the widest audience: anyone who is a friend of any
-            account in the session can join, without being your friend directly.
-            Use joinable_by_friends to restrict joining to your own friends only.""")
-        @DefaultString("joinable_by_friends_of_friends")
+            Minecraft's own joinability label for the session.
+            Keep this on joinable_by_friends. Other values (including
+            joinable_by_friends_of_friends) break multi-account joining: the client connects, finishes
+            the Bedrock handshake, then stops responding and times out.
+            This does NOT control who can see the session - see read-restriction below for that.""")
+        @DefaultString("joinable_by_friends")
         String joinability();
+
+        @Comment("""
+            Xbox MPSD system-level restriction on who may READ (see) the session.
+            This is the real visibility gate, applied by Xbox before Minecraft ever looks at the
+            joinability label above.
+              followed = only accounts followed by a session member can see it (default, safest)
+              none     = anyone who can reach the session can see it
+            Set this to none if friends-of-friends cannot see your world.""")
+        @DefaultString("followed")
+        String readRestriction();
+
+        @Comment("""
+            Xbox MPSD system-level restriction on who may JOIN the session.
+              followed = only accounts followed by a session member can join (default, safest)
+              none     = no restriction at the Xbox level
+            Note there is no built-in "friends of friends" value; none removes the limit entirely,
+            so anyone holding the session reference can join.""")
+        @DefaultString("followed")
+        String joinRestriction();
 
         @Comment("The world type shown in the Xbox session")
         @DefaultString("Survival")

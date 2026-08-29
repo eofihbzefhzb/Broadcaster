@@ -10,7 +10,12 @@ public class CreateSessionRequest extends JoinSessionRequest {
 
     public CreateSessionRequest(ExpandedSessionInfo sessionInfo, Map<String, String> nonces) {
         super(sessionInfo);
-        this.properties = new SessionProperties(new SessionSystemProperties(), new SessionCustomProperties(
+        // The MPSD system properties are the real access gate: Xbox applies them before Minecraft
+        // ever reads the Joinability label below. Leaving them pinned to "followed" is why
+        // friends-of-friends could not see the world no matter what Joinability was set to.
+        this.properties = new SessionProperties(
+            new SessionSystemProperties(sessionInfo.getJoinRestriction(), sessionInfo.getReadRestriction(), false),
+            new SessionCustomProperties(
             3,
             false,
             sessionInfo.getJoinability(),

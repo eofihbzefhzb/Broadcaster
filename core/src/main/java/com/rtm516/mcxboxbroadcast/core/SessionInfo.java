@@ -15,6 +15,9 @@ public class SessionInfo {
     private String ip;
     private int port;
     private String joinability = "joinable_by_friends";
+    /** Xbox MPSD system-level gates. "followed" (default) or "none". */
+    private String readRestriction = "followed";
+    private String joinRestriction = "followed";
     private String worldType = "Survival";
     private boolean editorWorld;
     private boolean hardcore;
@@ -113,6 +116,22 @@ public class SessionInfo {
         return joinability;
     }
 
+    public String getReadRestriction() {
+        return readRestriction;
+    }
+
+    public void setReadRestriction(String readRestriction) {
+        this.readRestriction = readRestriction;
+    }
+
+    public String getJoinRestriction() {
+        return joinRestriction;
+    }
+
+    public void setJoinRestriction(String joinRestriction) {
+        this.joinRestriction = joinRestriction;
+    }
+
     public void setJoinability(String joinability) {
         this.joinability = joinability;
     }
@@ -184,6 +203,8 @@ public class SessionInfo {
     public SessionInfo copy() {
         SessionInfo copy = new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
         copy.setJoinability(joinability);
+        copy.setReadRestriction(readRestriction);
+        copy.setJoinRestriction(joinRestriction);
         copy.setWorldType(worldType);
         copy.setEditorWorld(editorWorld);
         copy.setHardcore(hardcore);

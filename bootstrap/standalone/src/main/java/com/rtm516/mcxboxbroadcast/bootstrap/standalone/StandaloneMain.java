@@ -326,14 +326,20 @@ public class StandaloneMain {
         return root.get(key).getAsInt();
     }
 
+    private static String orDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
     private static void applySessionSettings(SessionInfo sessionInfo) {
         // Read from config like every other setting below. This was previously pinned to
         // "joinable_by_friends" by a REQUIRED_JOINABILITY constant, which silently overrode
         // whatever the config asked for.
         String joinability = config.xboxSession().joinability();
         sessionInfo.setJoinability(joinability == null || joinability.isBlank()
-            ? "joinable_by_friends_of_friends"
+            ? "joinable_by_friends"
             : joinability);
+        sessionInfo.setReadRestriction(orDefault(config.xboxSession().readRestriction(), "followed"));
+        sessionInfo.setJoinRestriction(orDefault(config.xboxSession().joinRestriction(), "followed"));
         sessionInfo.setWorldType(config.xboxSession().worldType());
         sessionInfo.setEditorWorld(config.xboxSession().editorWorld());
         sessionInfo.setHardcore(config.xboxSession().hardcore());

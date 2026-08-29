@@ -36,6 +36,8 @@ public class ExpandedSessionInfo extends SessionInfo {
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
         setJoinability(sessionInfo.getJoinability());
+        setReadRestriction(sessionInfo.getReadRestriction());
+        setJoinRestriction(sessionInfo.getJoinRestriction());
         setWorldType(sessionInfo.getWorldType());
         setEditorWorld(sessionInfo.isEditorWorld());
         setHardcore(sessionInfo.isHardcore());
@@ -59,6 +61,8 @@ public class ExpandedSessionInfo extends SessionInfo {
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
         setJoinability(sessionInfo.getJoinability());
+        setReadRestriction(sessionInfo.getReadRestriction());
+        setJoinRestriction(sessionInfo.getJoinRestriction());
         setWorldType(sessionInfo.getWorldType());
         setEditorWorld(sessionInfo.isEditorWorld());
         setHardcore(sessionInfo.isHardcore());
