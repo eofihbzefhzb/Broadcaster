@@ -160,20 +160,18 @@ public interface CoreConfig {
 
         @Comment("""
             Xbox MPSD system-level restriction on who may READ (see) the session.
-            This is the real visibility gate, applied by Xbox before Minecraft ever looks at the
-            joinability label above.
-              followed = only accounts followed by a session member can see it (default, safest)
-              none     = anyone who can reach the session can see it
-            Set this to none if friends-of-friends cannot see your world.""")
+            Leave this on "followed". "none" is rejected by Xbox with HTTP 400:
+              Invalid session 'readRestriction' provided, cannot be set to none on sessions
+              with the 'userAuthorizationStyle' capability.
+            Minecraft's session template carries that capability, so the session fails to publish
+            entirely. Exposed here only so the value is visible rather than hardcoded.""")
         @DefaultString("followed")
         String readRestriction();
 
         @Comment("""
             Xbox MPSD system-level restriction on who may JOIN the session.
-              followed = only accounts followed by a session member can join (default, safest)
-              none     = no restriction at the Xbox level
-            Note there is no built-in "friends of friends" value; none removes the limit entirely,
-            so anyone holding the session reference can join.""")
+            Same as read-restriction above: "none" is rejected with the same HTTP 400. Leave on
+            "followed". Widening reach is done through the accounts' friends lists, not here.""")
         @DefaultString("followed")
         String joinRestriction();
 

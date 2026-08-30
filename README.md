@@ -94,11 +94,9 @@ xbox-session:
   # Keep joinable_by_friends. Other values (including joinable_by_friends_of_friends) break
   # joining: the client connects, completes the Bedrock handshake, then stops responding.
   joinability: joinable_by_friends
-  # Xbox MPSD gates, applied before Minecraft reads the joinability label above.
-  # This pair - not joinability - is what controls whether people outside your accounts'
-  # follower lists can see and join the world.
-  read-restriction: none
-  join-restriction: none
+  # Xbox MPSD gates. Both must stay "followed" - see "Session visibility" below.
+  read-restriction: followed
+  join-restriction: followed
 
 friend-sync:
   auto-follow: false
@@ -122,11 +120,20 @@ a sub-account's profile sees the primary world and joins through it. Each sub-ac
 carries its own friends list, which is how the setup scales past the 2000-friend cap
 on a single account.
 
-Who can see and join is decided by `read-restriction` / `join-restriction` above, not
-by `joinability`. With both set to `none`, players outside your accounts' follower
-lists can see and join. Setting `join-restriction: followed` while leaving
-`read-restriction: none` lets people see the world but requires them to friend one of
-your accounts before they can join.
+There is no setting that opens the world to friends-of-friends. All three candidates
+were tried and none works:
+
+- `joinability: joinable_by_friends_of_friends` breaks joining outright. The client
+  connects, completes the Bedrock handshake, then goes silent and times out - direct
+  friends included.
+- `read-restriction: none` and `join-restriction: none` are rejected by Xbox with
+  HTTP 400: *Invalid session 'readRestriction' provided, cannot be set to none on
+  sessions with the 'userAuthorizationStyle' capability.* Minecraft's session template
+  carries that capability, so the session simply fails to publish.
+
+Reach comes from the accounts' friends lists instead. Each account holds up to 2000
+friends and `auto-follow` accepts incoming requests automatically, so adding
+sub-accounts is what widens the audience.
 
 The standalone console provides two safe operational commands:
 

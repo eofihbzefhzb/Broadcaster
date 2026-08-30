@@ -9,8 +9,6 @@ import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
 import dev.kastle.webrtc.PortAllocatorConfig;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -27,7 +25,6 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
-    private final Map<String, String> nonces = new HashMap<>();
 
     /**
      * Create a new session manager for a sub-session
