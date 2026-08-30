@@ -135,6 +135,34 @@ public class SubSessionManager extends SessionManagerCore {
     }
 
     /**
+     * Re-assert this account's membership in the primary session.
+     * <p>
+     * Called on the same schedule as the primary session update. Two things depend on it:
+     * <ul>
+     *   <li>{@code updateSession()} starts with {@link #checkConnection()}, so a dead RTA websocket
+     *       is detected here and the session (and the activity handle behind it) is rebuilt. Without
+     *       a periodic call nothing ever notices a sub-account's websocket dropping - the presence
+     *       heartbeat keeps running on its own schedule, so the account still shows as playing
+     *       Minecraft while its world card has disappeared from everyone's friends list.</li>
+     *   <li>MPSD drops a member whose {@code members.me} block is not refreshed. Re-PUTting it keeps
+     *       the sub-account inside the primary session.</li>
+     * </ul>
+     * Failures are logged rather than thrown: one sub-account being unable to refresh must not stop
+     * the others or the primary session update.
+     */
+    public void refresh() {
+        if (!initialized) {
+            return;
+        }
+
+        try {
+            updateSession();
+        } catch (SessionUpdateException e) {
+            logger.error("Failed to refresh session membership", e);
+        }
+    }
+
+    /**
      * Registers this account as a member of the primary session.
      * <p>
      * Sends a {@link JoinSessionRequest} (a {@code members.me} block only) to the PRIMARY session id.

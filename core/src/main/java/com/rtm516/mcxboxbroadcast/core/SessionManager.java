@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -49,7 +50,9 @@ public class SessionManager extends SessionManagerCore {
     public SessionManager(StorageManager storageManager, NotificationManager notificationManager, Logger logger) {
         super(storageManager, notificationManager, logger.prefixed("Primary Session"));
         this.scheduledThreadPool = Executors.newScheduledThreadPool(5, new NamedThreadFactory("MCXboxBroadcast Thread"));
-        this.subSessionManagers = new HashMap<>();
+        // Concurrent: the periodic update loop iterates this map from the scheduled pool while
+        // addSubSession/removeSubSession can mutate it from the console thread.
+        this.subSessionManagers = new ConcurrentHashMap<>();
         this.nonces = new HashMap<>();
     }
 
@@ -174,7 +177,30 @@ public class SessionManager extends SessionManagerCore {
      */
     public void updateSession(SessionInfo sessionInfo) throws SessionUpdateException {
         this.sessionInfo.updateSessionInfo(sessionInfo);
-        updateSession();
+        try {
+            updateSession();
+        } finally {
+            // Even if the primary update failed, the sub-accounts still need their membership
+            // refreshed - their own websockets may be perfectly healthy.
+            refreshSubSessions();
+        }
+    }
+
+    /**
+     * Re-assert every sub-account's membership in the primary session.
+     * <p>
+     * Only reached from the periodic update above, never from {@link #updateNonces()}: nonce updates
+     * are driven by RTA events and fire at an unpredictable rate, which would hammer the People/MPSD
+     * endpoints with one request per sub-account each time.
+     * <p>
+     * Each refresh is dispatched to the scheduled pool instead of running inline. A refresh can block
+     * on an HTTP retry chain of up to ~30 seconds, and running several of those in series would delay
+     * the primary session's own update loop.
+     */
+    private void refreshSubSessions() {
+        for (SubSessionManager subSessionManager : subSessionManagers.values()) {
+            scheduledThreadPool.execute(subSessionManager::refresh);
+        }
     }
 
     @Override

@@ -1,0 +1,90 @@
+--- orig/core/src/main/java/com/rtm516/mcxboxbroadcast/core/SessionManager.java	2026-08-30 18:16:14.299412818 +0000
++++ patched/core/src/main/java/com/rtm516/mcxboxbroadcast/core/SessionManager.java	2026-08-30 18:16:35.609852227 +0000
+@@ -22,6 +22,7 @@
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.ScheduledExecutorService;
+ import java.util.concurrent.ThreadLocalRandom;
+@@ -49,7 +50,9 @@
+     public SessionManager(StorageManager storageManager, NotificationManager notificationManager, Logger logger) {
+         super(storageManager, notificationManager, logger.prefixed("Primary Session"));
+         this.scheduledThreadPool = Executors.newScheduledThreadPool(5, new NamedThreadFactory("MCXboxBroadcast Thread"));
+-        this.subSessionManagers = new HashMap<>();
++        // Concurrent: the periodic update loop iterates this map from the scheduled pool while
++        // addSubSession/removeSubSession can mutate it from the console thread.
++        this.subSessionManagers = new ConcurrentHashMap<>();
+         this.nonces = new HashMap<>();
+     }
+ 
+@@ -174,7 +177,30 @@
+      */
+     public void updateSession(SessionInfo sessionInfo) throws SessionUpdateException {
+         this.sessionInfo.updateSessionInfo(sessionInfo);
+-        updateSession();
++        try {
++            updateSession();
++        } finally {
++            // Even if the primary update failed, the sub-accounts still need their membership
++            // refreshed - their own websockets may be perfectly healthy.
++            refreshSubSessions();
++        }
++    }
++
++    /**
++     * Re-assert every sub-account's membership in the primary session.
++     * <p>
++     * Only reached from the periodic update above, never from {@link #updateNonces()}: nonce updates
++     * are driven by RTA events and fire at an unpredictable rate, which would hammer the People/MPSD
++     * endpoints with one request per sub-account each time.
++     * <p>
++     * Each refresh is dispatched to the scheduled pool instead of running inline. A refresh can block
++     * on an HTTP retry chain of up to ~30 seconds, and running several of those in series would delay
++     * the primary session's own update loop.
++     */
++    private void refreshSubSessions() {
++        for (SubSessionManager subSessionManager : subSessionManagers.values()) {
++            scheduledThreadPool.execute(subSessionManager::refresh);
++        }
+     }
+ 
+     @Override
+--- orig/core/src/main/java/com/rtm516/mcxboxbroadcast/core/SubSessionManager.java	2026-08-30 18:16:14.299634506 +0000
++++ patched/core/src/main/java/com/rtm516/mcxboxbroadcast/core/SubSessionManager.java	2026-08-30 18:16:22.500619841 +0000
+@@ -135,6 +135,34 @@
+     }
+ 
+     /**
++     * Re-assert this account's membership in the primary session.
++     * <p>
++     * Called on the same schedule as the primary session update. Two things depend on it:
++     * <ul>
++     *   <li>{@code updateSession()} starts with {@link #checkConnection()}, so a dead RTA websocket
++     *       is detected here and the session (and the activity handle behind it) is rebuilt. Without
++     *       a periodic call nothing ever notices a sub-account's websocket dropping - the presence
++     *       heartbeat keeps running on its own schedule, so the account still shows as playing
++     *       Minecraft while its world card has disappeared from everyone's friends list.</li>
++     *   <li>MPSD drops a member whose {@code members.me} block is not refreshed. Re-PUTting it keeps
++     *       the sub-account inside the primary session.</li>
++     * </ul>
++     * Failures are logged rather than thrown: one sub-account being unable to refresh must not stop
++     * the others or the primary session update.
++     */
++    public void refresh() {
++        if (!initialized) {
++            return;
++        }
++
++        try {
++            updateSession();
++        } catch (SessionUpdateException e) {
++            logger.error("Failed to refresh session membership", e);
++        }
++    }
++
++    /**
+      * Registers this account as a member of the primary session.
+      * <p>
+      * Sends a {@link JoinSessionRequest} (a {@code members.me} block only) to the PRIMARY session id.
