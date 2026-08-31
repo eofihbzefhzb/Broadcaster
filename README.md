@@ -16,7 +16,7 @@ It is not documented here as the stock upstream project. This README only covers
 ## Reliable Geyser + MCXboxBroadcast Setup
 
 Use this repository as the Xbox session publisher and pair it with the
-[Geyser-Nethernet-for-mcxb fork](https://github.com/arti-inc/Geyser-Nethernet-for-mcxb)
+[companion Geyser fork](https://github.com/eofihbzefhzb/Geyser)
 as the gameplay ingress. The responsibilities are deliberately separate:
 
 ```text
@@ -32,9 +32,9 @@ mode. Geyser owns the live NetherNet connection and Paper owns the Java game.
 ### Requirements
 
 - Java 25 for the current development builds
-- Paper 1.21.11 (or the Java version selected by the paired Geyser build)
-- ViaVersion and Floodgate installed on Paper
-- The companion Geyser fork installed as `Geyser-Spigot.jar`
+- Velocity, in front of a Paper 1.21.11 backend (or the Java version selected by the paired Geyser build)
+- ViaVersion and Floodgate installed on Velocity
+- The companion Geyser fork installed as `Geyser-Velocity.jar`; it is the only bootstrap that fork builds
 - An Xbox/Microsoft account that is allowed to publish the session
 - Bedrock players who can see the publisher through the Xbox friends/session UI
 
@@ -45,10 +45,10 @@ runs from a sibling directory:
 
 ```text
 stack/
-  paper.jar
+  velocity.jar
   plugins/
-    Geyser-Spigot.jar
-    floodgate-spigot.jar
+    Geyser-Velocity.jar
+    floodgate-velocity.jar
     ViaVersion.jar
   mcxbox-standalone/
     MCXboxBroadcastStandalone.jar
@@ -170,12 +170,12 @@ server-side stage is the useful diagnosis.
 
 ## Recommended Layout
 
-Use this fork together with the companion Geyser fork in `arti-inc/Geyser-Nethernet-for-mcxb`.
+Use this fork together with the companion Geyser fork in `eofihbzefhzb/Geyser`.
 
 Recommended runtime layout:
 
 1. `MCXboxBroadcastStandalone.jar` publishes the Xbox Live session
-2. `Geyser-Spigot.jar` or `Geyser-Standalone.jar` from the companion fork hosts the real NetherNet/Bedrock ingress
+2. `Geyser-Velocity.jar` from the companion fork hosts the real NetherNet/Bedrock ingress
 3. Bedrock gameplay traffic terminates in Geyser, not in `mcxba`
 That removes the old gameplay relay bottleneck and is the smoothest setup from this work.
 
@@ -191,7 +191,7 @@ Assets:
 
 Release page:
 
-- https://github.com/arti-inc/Broadcaster/releases/tag/2
+- https://github.com/eofihbzefhzb/Broadcaster/releases/latest
 
 ## Which Jar To Use
 
@@ -215,7 +215,7 @@ In `external-hosted` mode, the important join identifier is the NetherNet networ
 
 Use this with:
 
-- https://github.com/arti-inc/Geyser-Nethernet-for-mcxb
+- https://github.com/eofihbzefhzb/Geyser
 ## Scope
 
 This README is intentionally limited to the NetherNet fork behavior added here. For the original upstream project history and broader feature set, see the upstream `MCXboxBroadcast/Broadcaster` repository.
