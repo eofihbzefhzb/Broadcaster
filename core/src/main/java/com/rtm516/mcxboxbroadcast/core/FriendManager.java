@@ -76,13 +76,15 @@ public class FriendManager {
             lastResponse = httpClient.send(xboxFollowersRequest, HttpResponse.BodyHandlers.ofString()).body();
 
             // We sometimes get an empty response so don't try and parse it
-            if (!lastResponse.isEmpty()) {
-                FollowerResponse xboxFollowerResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
-
-                if (xboxFollowerResponse.people != null) {
-                    people.addAll(xboxFollowerResponse.people);
-                }
+            if (lastResponse.isEmpty()) {
+                throw new XboxFriendsException("the followers request returned an empty body");
             }
+
+            FollowerResponse xboxFollowerResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
+            if (xboxFollowerResponse.people == null) {
+                throw new XboxFriendsException("the followers request returned no list - " + describe(xboxFollowerResponse));
+            }
+            people.addAll(xboxFollowerResponse.people);
         } catch (JsonParseException | IOException | InterruptedException e) {
             logger.debug("Follower request response: " + lastResponse);
             throw new XboxFriendsException(e.getMessage());
@@ -102,13 +104,15 @@ public class FriendManager {
             lastResponse = httpClient.send(xboxSocialRequest, HttpResponse.BodyHandlers.ofString()).body();
 
             // We sometimes get an empty response so don't try and parse it
-            if (!lastResponse.isEmpty()) {
-                FollowerResponse xboxSocialResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
-
-                if (xboxSocialResponse.people != null) {
-                    people.addAll(xboxSocialResponse.people);
-                }
+            if (lastResponse.isEmpty()) {
+                throw new XboxFriendsException("the social request returned an empty body");
             }
+
+            FollowerResponse xboxSocialResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
+            if (xboxSocialResponse.people == null) {
+                throw new XboxFriendsException("the social request returned no list - " + describe(xboxSocialResponse));
+            }
+            people.addAll(xboxSocialResponse.people);
         } catch (JsonParseException | IOException | InterruptedException e) {
             logger.debug("Social request response: " + lastResponse);
             throw new XboxFriendsException(e.getMessage());
@@ -127,6 +131,19 @@ public class FriendManager {
         List<FollowerResponse.Person> outPeopleList = new ArrayList<>(outPeople.values());
         lastFriendCache = outPeopleList;
         return outPeopleList;
+    }
+
+    /**
+     * Describes why a response carried no list, for the exception message.
+     * <p>
+     * Xbox answers with an error object rather than an HTTP error in this case, so the reason is
+     * only ever visible here.
+     */
+    private static String describe(FollowerResponse response) {
+        if (response.code != null || response.description != null) {
+            return "Xbox replied code=" + response.code + " description=" + response.description;
+        }
+        return "the response contained no people array and no error code";
     }
 
     /**

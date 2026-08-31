@@ -198,20 +198,34 @@ public abstract class SessionManagerCore {
         }
 
         int friendCount = -1;
+        String friendQueryFailure = null;
         if (shouldQueryFriendsOnStartup()) {
             try {
                 friendCount = friendManager.get().size();
-            } catch (Exception ignored) {
-                logger.debug("Unable to query the Xbox friends list during startup; continuing with session publishing.");
+            } catch (Exception exception) {
+                // Never report this as a count. Xbox answers a failed lookup with an error object
+                // rather than an HTTP error, and printing "1/2000" for an account that really has
+                // over a thousand followers reads as a catastrophic loss of reach rather than as
+                // the transient API hiccup it usually is.
+                friendQueryFailure = exception.getMessage() == null ? "unknown error" : exception.getMessage();
             }
         } else {
             logger.info("Friend synchronization is disabled; skipping the startup friends-list request.");
         }
 
-        String friendSummary = shouldQueryFriendsOnStartup()
-            ? friendCount + "/" + Constants.MAX_FRIENDS
-            : "not queried";
+        String friendSummary;
+        if (!shouldQueryFriendsOnStartup()) {
+            friendSummary = "not queried";
+        } else if (friendQueryFailure != null) {
+            friendSummary = "an unknown number of";
+        } else {
+            friendSummary = friendCount + "/" + Constants.MAX_FRIENDS;
+        }
         logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendSummary + " friends");
+        if (friendQueryFailure != null) {
+            logger.warn("Could not read this account's friends list: " + friendQueryFailure
+                + ". Session publishing continues, but auto-follow and invitations are skipped until a later sync succeeds.");
+        }
 
         if (handleFriendship()) {
             logger.info("Waiting for friendship to be processed...");
