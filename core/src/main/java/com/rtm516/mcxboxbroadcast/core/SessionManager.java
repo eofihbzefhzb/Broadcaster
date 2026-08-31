@@ -149,12 +149,18 @@ public class SessionManager extends SessionManagerCore {
             for (int i = 0; i < finalSubSessions.size(); i++) {
                 String subSession = finalSubSessions.get(i);
 
+                SubSessionManager subSessionManager = new SubSessionManager(subSession, this, storageManager().subSession(subSession), notificationManager(), logger);
+                // Register before init(), not after. init() is what joins the MPSD session, so the
+                // primary's periodic update can see this account arrive as a member while the map
+                // is still missing it - which is exactly how our own bots ended up announced as
+                // players. refresh() ignores a manager that has not finished initialising, so
+                // publishing it early is safe.
+                subSessionManagers.put(subSession, subSessionManager);
                 try {
-                    SubSessionManager subSessionManager = new SubSessionManager(subSession, this, storageManager().subSession(subSession), notificationManager(), logger);
                     subSessionManager.init();
                     subSessionManager.friendManager().init(this.friendSyncConfig);
-                    subSessionManagers.put(subSession, subSessionManager);
                 } catch (SessionCreationException | SessionUpdateException e) {
+                    subSessionManagers.remove(subSession);
                     logger.error("Failed to create sub-session " + subSession, e);
                 }
             }
@@ -357,6 +363,8 @@ public class SessionManager extends SessionManagerCore {
             return true;
         }
         for (SubSessionManager subSessionManager : subSessionManagers.values()) {
+            // getXuid() is null until that account authenticates. It cannot be an MPSD member before
+            // then, so a null here simply means "not this one" rather than an unknown account.
             if (xuid.equals(subSessionManager.getXuid())) {
                 return true;
             }
@@ -418,12 +426,14 @@ public class SessionManager extends SessionManagerCore {
         }
 
         // Create the sub-session manager
+        SubSessionManager subSessionManager = new SubSessionManager(id, this, storageManager().subSession(id), notificationManager(), logger);
+        // Registered before init() for the same reason as above: init() joins the MPSD session.
+        subSessionManagers.put(id, subSessionManager);
         try {
-            SubSessionManager subSessionManager = new SubSessionManager(id, this, storageManager().subSession(id), notificationManager(), logger);
             subSessionManager.init();
             subSessionManager.friendManager().init(friendSyncConfig);
-            subSessionManagers.put(id, subSessionManager);
         } catch (SessionCreationException | SessionUpdateException e) {
+            subSessionManagers.remove(id);
             coreLogger.error("Failed to create sub-session", e);
             return;
         }
