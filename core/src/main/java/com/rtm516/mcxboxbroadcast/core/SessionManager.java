@@ -39,6 +39,11 @@ public class SessionManager extends SessionManagerCore {
     private Runnable restartCallback;
 
     private Map<String, String> nonces;
+    /**
+     * Xuid -> gamertag of the session's members as of the last update, or null before the first one.
+     * Only touched from the session update, which is single-threaded.
+     */
+    private Map<String, String> knownMembers;
 
     /**
      * Create an instance of SessionManager
@@ -273,6 +278,8 @@ public class SessionManager extends SessionManagerCore {
         try {
             CreateSessionResponse sessionResponse = Constants.GSON.fromJson(responseBody, CreateSessionResponse.class);
 
+            logMemberChanges(sessionResponse);
+
             // Restart if we have 28/30 session members
             int players = sessionResponse.members().size();
             if (players >= 28) {
@@ -282,6 +289,59 @@ public class SessionManager extends SessionManagerCore {
         } catch (JsonParseException e) {
             throw new SessionUpdateException("Failed to parse session response: " + e.getMessage());
         }
+    }
+
+    /**
+     * Reports players entering and leaving the Xbox session.
+     * <p>
+     * This is the only join activity this process can see. The gameplay connection is NetherNet
+     * straight into Geyser, so nothing about it passes through here - Geyser's own log is where a
+     * join is confirmed. What the session document does show is MPSD membership, and that matters
+     * on its own: every member's follower list can see the world, so each line here is one more
+     * door opening or closing.
+     * <p>
+     * Resolution is the session update interval, so someone who joins and leaves between two
+     * updates is never seen. Members already present on the first update after a restart - the bot
+     * accounts, and anyone mid-game - are adopted silently rather than announced as arrivals.
+     */
+    private void logMemberChanges(CreateSessionResponse sessionResponse) {
+        if (sessionResponse == null || sessionResponse.members() == null) {
+            return;
+        }
+
+        Map<String, String> current = new HashMap<>();
+        for (SessionMember member : sessionResponse.members().values()) {
+            if (member == null || member.constants() == null) {
+                continue;
+            }
+            var system = member.constants().get("system");
+            if (system == null || system.xuid() == null) {
+                continue;
+            }
+            // The session document carries the gamertag; fall back to the xuid when it is absent.
+            String name = member.gamertag() == null || member.gamertag().isBlank()
+                ? system.xuid()
+                : member.gamertag();
+            current.put(system.xuid(), name);
+        }
+
+        if (knownMembers == null) {
+            knownMembers = current;
+            return;
+        }
+
+        for (Map.Entry<String, String> entry : current.entrySet()) {
+            if (!knownMembers.containsKey(entry.getKey())) {
+                logger.info(entry.getValue() + " joined the Xbox session (" + current.size() + " members)");
+            }
+        }
+        for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
+            if (!current.containsKey(entry.getKey())) {
+                logger.info(entry.getValue() + " left the Xbox session (" + current.size() + " members)");
+            }
+        }
+
+        knownMembers = current;
     }
 
     /**
