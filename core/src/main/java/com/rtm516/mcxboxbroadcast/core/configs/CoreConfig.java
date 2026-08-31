@@ -246,6 +246,18 @@ public interface CoreConfig {
         int subseason();
 
         @Comment("""
+            Give every sub-account its own Xbox session instead of having it join the primary one
+            as a member. All sessions still advertise the same NetherNet id, so every join lands on
+            the same Geyser ingress either way.
+            Leave this false unless you are testing a non-default joinability. Xbox only allows one
+            account to be connected to a session whose joinability is not "joinable_by_friends", so
+            the shared-session model silently blocks real players as soon as that value is changed.
+            One session per account satisfies that constraint, at the cost of each sub-account
+            showing up as hosting its own world rather than playing inside the primary's.""")
+        @DefaultBoolean(false)
+        boolean separateSubSessions();
+
+        @Comment("""
             How long standalone mode should wait for the local Geyser portal bridge to publish its
             automatically generated NetherNet ID when external-network-id is empty.
             This makes it safe to start MCXboxBroadcast before Paper/Geyser.""")

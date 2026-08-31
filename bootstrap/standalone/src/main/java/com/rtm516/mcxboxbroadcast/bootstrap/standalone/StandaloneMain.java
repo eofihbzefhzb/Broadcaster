@@ -350,6 +350,7 @@ public class StandaloneMain {
         sessionInfo.setHardcore(config.xboxSession().hardcore());
         sessionInfo.setExternalNetherNetHosted(isExternalNetherNetEnabled());
         sessionInfo.setExternalNetherNetId(effectiveExternalNetworkId());
+        sessionInfo.setSeparateSubSessions(config.netherNet().separateSubSessions());
         if (isLocalBridgeEnabled()) {
             sessionInfo.setProxyBridgeEnabled(true);
             sessionInfo.setRelayTargetAddress(config.bridge().backendAddress());
