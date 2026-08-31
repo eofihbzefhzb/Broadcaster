@@ -313,11 +313,12 @@ public class SessionManager extends SessionManagerCore {
      * on its own: every member's follower list can see the world, so each line here is one more
      * door opening or closing.
      * <p>
-     * Arrivals are close to live: Xbox pushes a change event and the member is visible within
-     * seconds. Departures are not, and cannot be - Xbox keeps a member in the document for several
-     * minutes after an unclean disconnect, which is the usual case here since a NetherNet peer that
-     * goes away never tells Xbox it left. A departure line is therefore a statement about reach,
-     * not about when someone stopped playing; the proxy log holds the real timing.
+     * Both directions are close to live, because this also runs from Xbox's own change events and
+     * not only on the session update cycle: measured at roughly five seconds behind the real
+     * disconnect. It remains Xbox's view rather than the game's, and a peer that vanishes without
+     * telling Xbox is only dropped once Xbox notices, so a slow departure is possible. These lines
+     * are a statement about reach - who can currently see the world through a member's friends
+     * list - and the proxy log holds the authoritative join and leave timings.
      * <p>
      * Members already present on the first update after a restart - the bot accounts, and anyone
      * mid-game - are adopted silently rather than announced as arrivals.
@@ -355,12 +356,12 @@ public class SessionManager extends SessionManagerCore {
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
             if (!current.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
-                // Deliberately not phrased as a live event. Xbox only drops a member several minutes
-                // after an unclean disconnect - the player is long gone from the game by then, and
-                // the proxy log is where the real departure time is. What this line actually marks
-                // is the moment their follower list stops being a way in.
-                logger.info(entry.getValue() + " is no longer in the Xbox session (" + current.size()
-                    + " members) - Xbox drops members a few minutes after they disconnect");
+                // Measured at a few seconds behind the real disconnect now that this also runs on
+                // Xbox's push events, but it is still Xbox's view rather than the game's: a peer
+                // that vanishes without telling Xbox is only dropped when Xbox notices. The proxy
+                // log holds the authoritative timing; what this line marks is the moment their
+                // follower list stops being a way in.
+                logger.info(entry.getValue() + " is no longer in the Xbox session (" + current.size() + " members)");
             }
         }
 
