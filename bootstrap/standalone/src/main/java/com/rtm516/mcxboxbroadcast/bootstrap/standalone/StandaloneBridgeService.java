@@ -4,10 +4,8 @@ import com.rtm516.mcxboxbroadcast.core.Constants;
 import com.rtm516.mcxboxbroadcast.core.Logger;
 import com.rtm516.mcxboxbroadcast.core.SessionInfo;
 import com.rtm516.mcxboxbroadcast.core.configs.CoreConfig;
-import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.BridgeClientSession;
 import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.BridgeUpstreamPacketHandler;
 import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.NetherNetBridgeServerSession;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -22,9 +20,6 @@ import org.cloudburstmc.protocol.bedrock.data.PacketCompressionAlgorithm;
 import org.cloudburstmc.protocol.bedrock.netty.initializer.BedrockChannelInitializer;
 
 import java.net.InetSocketAddress;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public final class StandaloneBridgeService {
@@ -32,7 +27,6 @@ public final class StandaloneBridgeService {
     private final Logger logger;
     private final Supplier<SessionInfo> sessionInfoSupplier;
     private final NioEventLoopGroup eventLoopGroup = new NioEventLoopGroup();
-    private final Set<Channel> clients = ConcurrentHashMap.newKeySet();
     private volatile Channel server;
 
     public StandaloneBridgeService(CoreConfig config, Logger logger, Supplier<SessionInfo> sessionInfoSupplier) {
@@ -61,7 +55,7 @@ public final class StandaloneBridgeService {
 
                 @Override
                 protected void initSession(NetherNetBridgeServerSession session) {
-                    // Utilise la compression SNAPPY pour le mode standalone
+                    // Standalone mode relays over RakNet, which negotiates SNAPPY
                     session.setPacketHandler(new BridgeUpstreamPacketHandler(session, StandaloneMain.sessionManager, logger, PacketCompressionAlgorithm.SNAPPY));
                 }
             })
@@ -81,35 +75,11 @@ public final class StandaloneBridgeService {
     }
 
     public void stop() {
-        this.clients.forEach(Channel::disconnect);
         if (this.server != null) {
             this.server.disconnect();
             this.server = null;
         }
         this.eventLoopGroup.shutdownGracefully();
-    }
-
-    public void newClient(Consumer<BridgeClientSession> sessionConsumer) {
-        Channel channel = new Bootstrap()
-            .group(this.eventLoopGroup)
-            .channelFactory(RakChannelFactory.client(NioDatagramChannel.class))
-            .option(RakChannelOption.RAK_PROTOCOL_VERSION, getCodec().getRaknetProtocolVersion())
-            .handler(new BedrockChannelInitializer<BridgeClientSession>() {
-                @Override
-                protected BridgeClientSession createSession0(BedrockPeer peer, int subClientId) {
-                    return new BridgeClientSession(peer, subClientId);
-                }
-
-                @Override
-                protected void initSession(BridgeClientSession session) {
-                    sessionConsumer.accept(session);
-                }
-            })
-            .connect(getBackendAddress())
-            .awaitUninterruptibly()
-            .channel();
-
-        this.clients.add(channel);
     }
 
     private InetSocketAddress getBackendAddress() {

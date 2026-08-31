@@ -50,7 +50,7 @@ public final class BridgeClientSession extends BedrockClientSession {
                 sendPacket.setPacketId(wrapper.getPacketId());
                 this.sendSession.sendPacket(sendPacket);
             } catch (Exception e) {
-                // S'assure que la mémoire est libérée si l'envoi échoue
+                // Make sure the buffer is released if the send fails
                 buffer.release();
                 throw e;
             }

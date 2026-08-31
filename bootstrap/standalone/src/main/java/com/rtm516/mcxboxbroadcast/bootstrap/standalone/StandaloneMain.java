@@ -41,7 +41,7 @@ public class StandaloneMain {
     private static StandaloneBridgeService bridgeService;
     private static String discoveredExternalNetworkId;
 
-    // ANTI-SPAM LOG CACHE : Permet de mémosier le dernier ID logué pour éviter le spam en boucle
+    // Remembers the last network id that was logged, so the discovery loop reports a given id once
     private static String lastLoggedPrimaryNetworkId = null;
 
     public static SessionManager sessionManager;
@@ -154,6 +154,11 @@ public class StandaloneMain {
 
         if (isLocalBridgeEnabled()) {
             bridgeService = new StandaloneBridgeService(config, logger.prefixed("bridge"), () -> sessionInfo);
+            // "stop"/"exit" ends the process through System.exit(), so the listener and its event
+            // loop group are only released if that release hangs off a shutdown hook. Registered
+            // before start() so a failed bind still frees the group it already allocated.
+            StandaloneBridgeService serviceToStop = bridgeService;
+            Runtime.getRuntime().addShutdownHook(new Thread(serviceToStop::stop, "MCXboxBroadcast-bridge-shutdown"));
             try {
                 bridgeService.start();
             } catch (IllegalStateException exception) {
@@ -442,13 +447,13 @@ public class StandaloneMain {
             return config.netherNet().externalNetworkId().trim();
         }
 
-        String fileDiscoveredId = discoverExternalNetworkIdFromFile();
+        String fileDiscoveredId = discoverStatusNetworkId();
         if (!fileDiscoveredId.isBlank()) {
             return fileDiscoveredId;
         }
 
-        // SUPPRIMÉ : L'avertissement répétitif dans la boucle de démarrage
-        // logger.warn("external-hosted is enabled but no NetherNet network ID is configured and none was auto-discovered from the local Geyser ID file.");
+        // Deliberately silent: this runs inside the startup discovery loop, so warning here
+        // repeated the same line every pass until Geyser published its id.
         return "";
     }
 
@@ -483,7 +488,7 @@ public class StandaloneMain {
             return;
         }
 
-        String found = discoverExternalNetworkIdFromFile();
+        String found = discoverStatusNetworkId();
         if (found.isBlank() || found.equals(discoveredExternalNetworkId)) {
             return;
         }
@@ -499,10 +504,6 @@ public class StandaloneMain {
      * There is a single NetherNet id to discover. The subseason used to select one shard out of
      * several here; Geyser publishes one ingress now, so both branches did the same thing.
      */
-    private static String discoverExternalNetworkIdFromFile() {
-        return discoverStatusNetworkId();
-    }
-
     private static String discoverStatusNetworkId() {
         for (String candidate : getStatusFileCandidates()) {
             try {
@@ -537,7 +538,7 @@ public class StandaloneMain {
     }
 
     private static boolean hasReadyExternalNetworkStatus() {
-        return !discoverExternalNetworkIdFromFile().isBlank();
+        return !discoverStatusNetworkId().isBlank();
     }
 
     private static boolean isReadyStatus(JsonObject root) {
