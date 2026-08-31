@@ -331,17 +331,37 @@ public class SessionManager extends SessionManagerCore {
         }
 
         for (Map.Entry<String, String> entry : current.entrySet()) {
-            if (!knownMembers.containsKey(entry.getKey())) {
+            if (!knownMembers.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
                 logger.info(entry.getValue() + " joined the Xbox session (" + current.size() + " members)");
             }
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
-            if (!current.containsKey(entry.getKey())) {
+            if (!current.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
                 logger.info(entry.getValue() + " left the Xbox session (" + current.size() + " members)");
             }
         }
 
         knownMembers = current;
+    }
+
+    /**
+     * Whether this xuid is one of our own publishing accounts.
+     * <p>
+     * The sub-accounts register one after another over the first minute, so they all land after the
+     * first snapshot and were announced as arrivals - six lines of noise per startup that say
+     * nothing, and that bury the real players among them. They are still counted in the member
+     * total, because each of them genuinely holds a door open.
+     */
+    private boolean isOwnAccount(String xuid) {
+        if (xuid.equals(getXuid())) {
+            return true;
+        }
+        for (SubSessionManager subSessionManager : subSessionManagers.values()) {
+            if (xuid.equals(subSessionManager.getXuid())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

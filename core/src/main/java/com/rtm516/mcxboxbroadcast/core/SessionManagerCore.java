@@ -52,6 +52,11 @@ import java.util.function.Consumer;
  * Simple manager to authenticate and create sessions on Xbox
  */
 public abstract class SessionManagerCore {
+    /** How many times the startup friends-list request is tried before giving up on it. */
+    private static final int FRIENDS_QUERY_ATTEMPTS = 3;
+    /** Gap between those attempts. Xbox usually answers correctly on the second one. */
+    private static final long FRIENDS_QUERY_RETRY_DELAY_MS = 2000;
+
     private final AuthManager authManager;
     private final FriendManager friendManager;
     protected final HttpClient httpClient;
@@ -200,14 +205,33 @@ public abstract class SessionManagerCore {
         int friendCount = -1;
         String friendQueryFailure = null;
         if (shouldQueryFriendsOnStartup()) {
-            try {
-                friendCount = friendManager.get().size();
-            } catch (Exception exception) {
-                // Never report this as a count. Xbox answers a failed lookup with an error object
-                // rather than an HTTP error, and printing "1/2000" for an account that really has
-                // over a thousand followers reads as a catastrophic loss of reach rather than as
-                // the transient API hiccup it usually is.
-                friendQueryFailure = exception.getMessage() == null ? "unknown error" : exception.getMessage();
+            // Xbox very often rejects the first friends request made right after authenticating -
+            // "code=1027 Failed to hydrate one or more users", or a plain timeout - and then answers
+            // the same request correctly a few seconds later. Retrying here keeps auto-follow and
+            // invitations working from the start instead of waiting for the next periodic sync.
+            for (int attempt = 1; attempt <= FRIENDS_QUERY_ATTEMPTS; attempt++) {
+                try {
+                    friendCount = friendManager.get().size();
+                    friendQueryFailure = null;
+                    break;
+                } catch (Exception exception) {
+                    // Never report a failure as a count. Xbox answers a failed lookup with an error
+                    // object rather than an HTTP error, and printing "1/2000" for an account that
+                    // really has over a thousand followers reads as a catastrophic loss of reach
+                    // rather than as the transient hiccup it usually is.
+                    friendQueryFailure = exception.getMessage() == null ? "unknown error" : exception.getMessage();
+                    if (attempt == FRIENDS_QUERY_ATTEMPTS) {
+                        break;
+                    }
+                    logger.debug("Friends list request failed (attempt " + attempt + "/" + FRIENDS_QUERY_ATTEMPTS
+                        + "), retrying: " + friendQueryFailure);
+                    try {
+                        Thread.sleep(FRIENDS_QUERY_RETRY_DELAY_MS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
             }
         } else {
             logger.info("Friend synchronization is disabled; skipping the startup friends-list request.");
