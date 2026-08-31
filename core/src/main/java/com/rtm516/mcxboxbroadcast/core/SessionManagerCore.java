@@ -53,7 +53,7 @@ import java.util.function.Consumer;
  */
 public abstract class SessionManagerCore {
     /** How many times the startup friends-list request is tried before giving up on it. */
-    private static final int FRIENDS_QUERY_ATTEMPTS = 3;
+    private static final int FRIENDS_QUERY_ATTEMPTS = 2;
     /** Gap between those attempts. Xbox usually answers correctly on the second one. */
     private static final long FRIENDS_QUERY_RETRY_DELAY_MS = 2000;
 
@@ -237,18 +237,42 @@ public abstract class SessionManagerCore {
             logger.info("Friend synchronization is disabled; skipping the startup friends-list request.");
         }
 
+        // peoplehub hydrates every profile in the list and refuses the whole thing when one of them
+        // cannot be resolved - a deleted, banned or private follower is enough. The summary endpoint
+        // is a different service that only counts, so it still answers. Use it rather than admit to
+        // knowing nothing: the number is real, it is only the list itself we could not read.
+        boolean countFromSummary = false;
+        if (shouldQueryFriendsOnStartup() && friendQueryFailure != null) {
+            try {
+                SocialSummaryResponse summary = socialSummary();
+                if (summary != null) {
+                    friendCount = summary.targetFollowingCount();
+                    countFromSummary = true;
+                }
+            } catch (Exception ignored) {
+                // Leave the count unknown; the warning below still explains why.
+            }
+        }
+
         String friendSummary;
         if (!shouldQueryFriendsOnStartup()) {
             friendSummary = "not queried";
-        } else if (friendQueryFailure != null) {
+        } else if (friendQueryFailure != null && !countFromSummary) {
             friendSummary = "an unknown number of";
         } else {
             friendSummary = friendCount + "/" + Constants.MAX_FRIENDS;
         }
         logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendSummary + " friends");
         if (friendQueryFailure != null) {
-            logger.warn("Could not read this account's friends list: " + friendQueryFailure
-                + ". Session publishing continues, but auto-follow and invitations are skipped until a later sync succeeds.");
+            // One line, not a paragraph: this condition is permanent for an affected account and
+            // reappears on every start, so the detail belongs in the debug log rather than in front
+            // of the operator each time. What matters at warn level is that auto-follow is stalled.
+            logger.warn("Auto-follow is stalled for this account: Xbox will not return its followers list."
+                + (countFromSummary ? " The count above comes from the summary endpoint." : ""));
+            logger.debug("Followers list unavailable: " + friendQueryFailure
+                + ". Xbox refuses the whole list when a single follower's profile cannot be resolved"
+                + " - a deleted, banned or private account - so retrying does not help. Removing that"
+                + " follower is the only fix.");
         }
 
         if (handleFriendship()) {

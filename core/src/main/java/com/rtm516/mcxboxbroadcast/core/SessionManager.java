@@ -41,7 +41,8 @@ public class SessionManager extends SessionManagerCore {
     private Map<String, String> nonces;
     /**
      * Xuid -> gamertag of the session's members as of the last update, or null before the first one.
-     * Only touched from the session update, which is single-threaded.
+     * Read and written from both the scheduled session update and the RTA websocket thread, so every
+     * access goes through the synchronized logMemberChanges().
      */
     private Map<String, String> knownMembers;
 
@@ -233,6 +234,12 @@ public class SessionManager extends SessionManagerCore {
                 throw new SessionUpdateException("Failed to get session for nonces, joining will not work: sessionResponse is null");
             }
 
+            // Xbox pushes a change event for every membership change and RtaWebsocketClient turns it
+            // into this call, so this is the fastest view of the member list we get. Reading it here
+            // reports arrivals and departures within seconds; the periodic PUT below would otherwise
+            // be the only source and it only runs on the session update interval.
+            logMemberChanges(sessionResponse);
+
             boolean hasChanges = false;
 
             // Collect active XUIDs from the session
@@ -310,7 +317,7 @@ public class SessionManager extends SessionManagerCore {
      * updates is never seen. Members already present on the first update after a restart - the bot
      * accounts, and anyone mid-game - are adopted silently rather than announced as arrivals.
      */
-    private void logMemberChanges(CreateSessionResponse sessionResponse) {
+    private synchronized void logMemberChanges(CreateSessionResponse sessionResponse) {
         if (sessionResponse == null || sessionResponse.members() == null) {
             return;
         }
