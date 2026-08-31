@@ -313,9 +313,14 @@ public class SessionManager extends SessionManagerCore {
      * on its own: every member's follower list can see the world, so each line here is one more
      * door opening or closing.
      * <p>
-     * Resolution is the session update interval, so someone who joins and leaves between two
-     * updates is never seen. Members already present on the first update after a restart - the bot
-     * accounts, and anyone mid-game - are adopted silently rather than announced as arrivals.
+     * Arrivals are close to live: Xbox pushes a change event and the member is visible within
+     * seconds. Departures are not, and cannot be - Xbox keeps a member in the document for several
+     * minutes after an unclean disconnect, which is the usual case here since a NetherNet peer that
+     * goes away never tells Xbox it left. A departure line is therefore a statement about reach,
+     * not about when someone stopped playing; the proxy log holds the real timing.
+     * <p>
+     * Members already present on the first update after a restart - the bot accounts, and anyone
+     * mid-game - are adopted silently rather than announced as arrivals.
      */
     private synchronized void logMemberChanges(CreateSessionResponse sessionResponse) {
         if (sessionResponse == null || sessionResponse.members() == null) {
@@ -350,7 +355,12 @@ public class SessionManager extends SessionManagerCore {
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
             if (!current.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
-                logger.info(entry.getValue() + " left the Xbox session (" + current.size() + " members)");
+                // Deliberately not phrased as a live event. Xbox only drops a member several minutes
+                // after an unclean disconnect - the player is long gone from the game by then, and
+                // the proxy log is where the real departure time is. What this line actually marks
+                // is the moment their follower list stops being a way in.
+                logger.info(entry.getValue() + " is no longer in the Xbox session (" + current.size()
+                    + " members) - Xbox drops members a few minutes after they disconnect");
             }
         }
 
