@@ -10,7 +10,6 @@ It is not documented here as the stock upstream project. This README only covers
 
 - `external-hosted` NetherNet publish mode for pairing with a separate Geyser ingress host
 - a standalone jar release for Xbox session publishing
-- a Geyser extension jar release for installs that still want the extension form
 - bridge-first defaults with no transfer fallback in the gameplay path
 - docs and config guidance for local-device deployments
 
@@ -189,7 +188,6 @@ Current release line:
 Assets:
 
 - `MCXboxBroadcastStandalone.jar`
-- `MCXboxBroadcastExtension.jar`
 
 Release page:
 
@@ -197,24 +195,15 @@ Release page:
 
 ## Which Jar To Use
 
-### Standalone
-
-Use `MCXboxBroadcastStandalone.jar` when this process should run as its own Xbox session publisher.
+`MCXboxBroadcastStandalone.jar` is the only jar this fork builds: the Geyser extension form
+was removed because Geyser's own NetherNet ingress now owns the gameplay connection, leaving
+this process responsible only for publishing the Xbox session.
 
 Run:
 
 ```bash
 java -jar MCXboxBroadcastStandalone.jar
 ```
-
-### Extension
-
-Use `MCXboxBroadcastExtension.jar` only if you explicitly want the extension form.
-
-Install:
-
-1. Drop the jar into Geyser's `extensions/` folder
-2. Restart Geyser
 
 ## Config Note For Local Device Installs
 
