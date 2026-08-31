@@ -3,24 +3,13 @@ package com.rtm516.mcxboxbroadcast.core;
 import com.google.gson.JsonParseException;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionCreationException;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionUpdateException;
-import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionRequest;
 import com.rtm516.mcxboxbroadcast.core.models.session.JoinSessionRequest;
 import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionResponse;
-import com.rtm516.mcxboxbroadcast.core.models.session.member.SessionMember;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
 import dev.kastle.webrtc.PortAllocatorConfig;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Session manager for a sub-session.
@@ -36,14 +25,6 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
-    /**
-     * Join nonces, only used in separate-session mode where this account hosts its own session.
-     * <p>
-     * Deliberately a copy of {@link SessionManager}'s logic rather than a shared helper: keeping it
-     * here means nothing on the primary account's code path changes while separate sessions are off,
-     * which is the whole point of the flag. Fold the two together if the mode ever becomes default.
-     */
-    private final Map<String, String> nonces = new HashMap<>();
 
     /**
      * Create a new session manager for a sub-session
@@ -79,21 +60,7 @@ public class SubSessionManager extends SessionManagerCore {
      */
     @Override
     public String getSessionId() {
-        if (separateSession() && this.sessionInfo != null) {
-            return this.sessionInfo.getSessionId();
-        }
         return parent.getSessionId();
-    }
-
-    /**
-     * Whether this account hosts its own session instead of joining the primary one as a member.
-     * <p>
-     * Read from the parent rather than from config directly because the flag travels on
-     * {@link SessionInfo}, the same way the external-NetherNet flags do.
-     */
-    private boolean separateSession() {
-        ExpandedSessionInfo parentInfo = parent.sessionInfo();
-        return parentInfo != null && parentInfo.isSeparateSubSessions();
     }
 
 
@@ -140,21 +107,6 @@ public class SubSessionManager extends SessionManagerCore {
             shardInfo.setExternalNetherNetId(parentInfo.getExternalNetherNetId());
         }
 
-        if (parentInfo != null) {
-            // Inert in shared mode - a member's JoinSessionRequest carries none of this - but
-            // required in separate-session mode, where this account posts its own properties and
-            // would otherwise advertise SessionInfo's hardcoded defaults instead of the config.
-            shardInfo.setSeparateSubSessions(parentInfo.isSeparateSubSessions());
-            shardInfo.setJoinability(parentInfo.getJoinability());
-            shardInfo.setReadRestriction(parentInfo.getReadRestriction());
-            shardInfo.setJoinRestriction(parentInfo.getJoinRestriction());
-            shardInfo.setWorldType(parentInfo.getWorldType());
-            shardInfo.setEditorWorld(parentInfo.isEditorWorld());
-            shardInfo.setHardcore(parentInfo.isHardcore());
-            shardInfo.setPlayers(parentInfo.getPlayers());
-            shardInfo.setMaxPlayers(parentInfo.getMaxPlayers());
-        }
-
         return shardInfo;
     }
 
@@ -176,54 +128,7 @@ public class SubSessionManager extends SessionManagerCore {
      */
     @Override
     public void updateNonces() throws SessionUpdateException {
-        if (!separateSession()) {
-            // Shared mode: nonces belong to the host, which is the primary account.
-            return;
-        }
-
-        HttpRequest getSessionRequest = HttpRequest.newBuilder()
-            .uri(URI.create(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId())))
-            .header("Content-Type", "application/json")
-            .header("Authorization", getTokenHeader())
-            .header("x-xbl-contract-version", "107")
-            .GET()
-            .build();
-
-        try {
-            HttpResponse<String> response = httpClient.send(getSessionRequest, HttpResponse.BodyHandlers.ofString());
-            CreateSessionResponse sessionResponse = Constants.GSON.fromJson(response.body(), CreateSessionResponse.class);
-            if (sessionResponse == null) {
-                throw new SessionUpdateException("Failed to get session for nonces, joining will not work: sessionResponse is null");
-            }
-
-            Set<String> activeXuids = new HashSet<>();
-            for (Map.Entry<String, SessionMember> entry : sessionResponse.members().entrySet()) {
-                activeXuids.add(entry.getValue().constants().get("system").xuid());
-            }
-            activeXuids.remove(sessionInfo.getXuid());
-
-            boolean hasChanges = nonces.keySet().retainAll(activeXuids);
-
-            for (String xuid : activeXuids) {
-                if (!nonces.containsKey(xuid)) {
-                    byte[] bytes = new byte[8];
-                    ThreadLocalRandom.current().nextBytes(bytes);
-                    StringBuilder hex = new StringBuilder(16);
-                    for (byte b : bytes) {
-                        hex.append(String.format("%02x", b));
-                    }
-                    nonces.put(xuid, hex.toString());
-                    logger.debug("Generated nonce for XUID " + xuid + ": " + hex);
-                    hasChanges = true;
-                }
-            }
-
-            if (hasChanges) {
-                updateSession();
-            }
-        } catch (IOException | InterruptedException e) {
-            throw new SessionUpdateException("Failed to get session for nonces, joining will not work: " + e.getMessage());
-        }
+        // Intentionally empty - see javadoc.
     }
 
     /**
@@ -248,12 +153,6 @@ public class SubSessionManager extends SessionManagerCore {
         }
 
         try {
-            if (separateSession()) {
-                // This account advertises its own session, so the world name and player counts have
-                // to be pulled from the primary each cycle. In shared mode there is nothing to
-                // mirror: the primary session IS the advertisement.
-                this.sessionInfo.updateSessionInfo(buildShardSessionInfo());
-            }
             updateSession();
         } catch (SessionUpdateException e) {
             logger.error("Failed to refresh session membership", e);
@@ -272,11 +171,7 @@ public class SubSessionManager extends SessionManagerCore {
     protected void updateSession() throws SessionUpdateException {
         checkConnection();
 
-        // Separate-session mode: this account owns the session, so it posts the full properties to
-        // its own id. Shared mode: only the members.me block, to the primary's id.
-        String responseBody = separateSession()
-            ? super.updateSessionInternal(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId()), new CreateSessionRequest(this.sessionInfo, nonces))
-            : super.updateSessionInternal(Constants.CREATE_SESSION.formatted(parent.getSessionId()), new JoinSessionRequest(this.sessionInfo));
+        String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(parent.getSessionId()), new JoinSessionRequest(this.sessionInfo));
         try {
             // Just confirm the response parses; unlike the primary session we don't restart on
             // high player counts here - the primary session already handles that for the shared backend

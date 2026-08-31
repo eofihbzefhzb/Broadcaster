@@ -26,8 +26,6 @@ public class SessionInfo {
     private int relayTargetPort;
     private boolean externalNetherNetHosted;
     private String externalNetherNetId;
-    /** @see CoreConfig.NetherNetConfig#separateSubSessions() */
-    private boolean separateSubSessions;
 
     public SessionInfo() {
     }
@@ -202,14 +200,6 @@ public class SessionInfo {
         this.externalNetherNetId = externalNetherNetId;
     }
 
-    public boolean isSeparateSubSessions() {
-        return separateSubSessions;
-    }
-
-    public void setSeparateSubSessions(boolean separateSubSessions) {
-        this.separateSubSessions = separateSubSessions;
-    }
-
     public SessionInfo copy() {
         SessionInfo copy = new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
         copy.setJoinability(joinability);
@@ -223,7 +213,6 @@ public class SessionInfo {
         copy.setRelayTargetPort(relayTargetPort);
         copy.setExternalNetherNetHosted(externalNetherNetHosted);
         copy.setExternalNetherNetId(externalNetherNetId);
-        copy.setSeparateSubSessions(separateSubSessions);
         return copy;
     }
 

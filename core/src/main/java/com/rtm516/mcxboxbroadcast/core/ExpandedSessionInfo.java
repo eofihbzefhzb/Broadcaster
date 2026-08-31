@@ -46,7 +46,6 @@ public class ExpandedSessionInfo extends SessionInfo {
         setRelayTargetPort(sessionInfo.getRelayTargetPort());
         setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
-        setSeparateSubSessions(sessionInfo.isSeparateSubSessions());
         if (sessionInfo.isExternalNetherNetHosted()
             && sessionInfo.getExternalNetherNetId() != null
             && !sessionInfo.getExternalNetherNetId().isBlank()) {
@@ -72,7 +71,6 @@ public class ExpandedSessionInfo extends SessionInfo {
         setRelayTargetPort(sessionInfo.getRelayTargetPort());
         setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
-        setSeparateSubSessions(sessionInfo.isSeparateSubSessions());
     }
 
     public String getConnectionId() {
