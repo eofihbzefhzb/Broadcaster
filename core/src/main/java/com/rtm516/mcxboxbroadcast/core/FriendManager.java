@@ -546,8 +546,12 @@ public class FriendManager {
                 // If the cache is empty then get the current friends from Xbox Live
                 lastFriendCache = get();
             } catch (XboxFriendsException e) {
-                logger.error("Failed to get friends from Xbox Live", e);
-                lastFriendCache = new ArrayList<>();
+                // Do not cache the failure. Xbox returns code=1027 transiently - often on the very
+                // first request after authenticating - and storing an empty list here made a single
+                // hiccup permanent: the field stops being null, so every later call answered "no
+                // friends" without ever retrying, for the rest of the process's life.
+                logger.error("Failed to get friends from Xbox Live, will retry on the next request", e);
+                return new ArrayList<>();
             }
         }
 
