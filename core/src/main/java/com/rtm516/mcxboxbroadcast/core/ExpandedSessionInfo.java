@@ -39,6 +39,7 @@ public class ExpandedSessionInfo extends SessionInfo {
         setReadRestriction(sessionInfo.getReadRestriction());
         setJoinRestriction(sessionInfo.getJoinRestriction());
         setWorldType(sessionInfo.getWorldType());
+        setBroadcastSetting(sessionInfo.getBroadcastSetting());
         setEditorWorld(sessionInfo.isEditorWorld());
         setHardcore(sessionInfo.isHardcore());
         setProxyBridgeEnabled(sessionInfo.isProxyBridgeEnabled());
@@ -64,6 +65,7 @@ public class ExpandedSessionInfo extends SessionInfo {
         setReadRestriction(sessionInfo.getReadRestriction());
         setJoinRestriction(sessionInfo.getJoinRestriction());
         setWorldType(sessionInfo.getWorldType());
+        setBroadcastSetting(sessionInfo.getBroadcastSetting());
         setEditorWorld(sessionInfo.isEditorWorld());
         setHardcore(sessionInfo.isHardcore());
         setProxyBridgeEnabled(sessionInfo.isProxyBridgeEnabled());

@@ -19,6 +19,8 @@ public class SessionInfo {
     private String readRestriction = "followed";
     private String joinRestriction = "followed";
     private String worldType = "Survival";
+    /** @see CoreConfig.XboxSessionConfig#broadcastSetting() */
+    private int broadcastSetting = 3;
     private boolean editorWorld;
     private boolean hardcore;
     private boolean proxyBridgeEnabled;
@@ -200,12 +202,21 @@ public class SessionInfo {
         this.externalNetherNetId = externalNetherNetId;
     }
 
+    public int getBroadcastSetting() {
+        return broadcastSetting;
+    }
+
+    public void setBroadcastSetting(int broadcastSetting) {
+        this.broadcastSetting = broadcastSetting;
+    }
+
     public SessionInfo copy() {
         SessionInfo copy = new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
         copy.setJoinability(joinability);
         copy.setReadRestriction(readRestriction);
         copy.setJoinRestriction(joinRestriction);
         copy.setWorldType(worldType);
+        copy.setBroadcastSetting(broadcastSetting);
         copy.setEditorWorld(editorWorld);
         copy.setHardcore(hardcore);
         copy.setProxyBridgeEnabled(proxyBridgeEnabled);

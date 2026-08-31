@@ -150,10 +150,14 @@ public interface CoreConfig {
     @ConfigSerializable
     interface XboxSessionConfig {
         @Comment("""
-            Minecraft's own joinability label for the session.
-            Keep this on joinable_by_friends. Other values (including
-            joinable_by_friends_of_friends) break multi-account joining: the client connects, finishes
-            the Bedrock handshake, then stops responding and times out.
+            Minecraft's own joinability label for the session. It has exactly two valid values:
+            "joinable_by_friends" and "invite_only". Anything else is not a member of the
+            enumeration - the client reads it, fails to interpret it, and silently gives up right
+            after the resource-pack step, leaving the player on "searching for a game session".
+            In particular "joinable_by_friends_of_friends" does not exist; it was tested twice, on
+            both the shared-session and one-session-per-account layouts, and failed identically.
+            Friends-of-friends visibility is not set here anyway - see broadcast-setting below,
+            which already defaults to it.
             This does NOT control who can see the session - see read-restriction below for that.""")
         @DefaultString("joinable_by_friends")
         String joinability();
@@ -174,6 +178,17 @@ public interface CoreConfig {
             "followed". Widening reach is done through the accounts' friends lists, not here.""")
         @DefaultString("followed")
         String joinRestriction();
+
+        @Comment("""
+            Minecraft's numeric visibility setting for the session, sent as BroadcastSetting.
+            3 = friends of friends (the value Minecraft itself publishes, and the default here),
+            2 = friends only, 1 = invite only, 4 = public.
+            Note that Xbox applies readRestriction before the client ever reads this, so lowering
+            the restriction is not something this field can do. It is exposed for experimentation;
+            leave it at 3 unless you are deliberately testing another value.""")
+        @DefaultNumeric(3)
+        @NumericRange(from = 0, to = 4)
+        int broadcastSetting();
 
         @Comment("The world type shown in the Xbox session")
         @DefaultString("Survival")
