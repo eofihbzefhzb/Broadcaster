@@ -110,6 +110,12 @@ jobs:
   docker-standalone:
     needs: build
     runs-on: ubuntu-latest
+    # Upstream publishes a container image to GHCR. A fork's GITHUB_TOKEN cannot create the package
+    # ("denied: installation not allowed to Create organization package"), so this job can only ever
+    # fail here - and it marked every otherwise successful release as failed, which hides real
+    # breakage. Restricted to the upstream repository; the standalone jar on the release is what
+    # this fork actually ships.
+    if: ${{ github.repository == 'MCXboxBroadcast/Broadcaster' }}
     steps:
       - uses: actions/checkout@v6
 
