@@ -81,6 +81,14 @@ public abstract class SessionManagerCore {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private NetherNetXboxRpcSignaling signaling;
+    /**
+     * Native WebRTC factory backing the local NetherNet listener, when this process hosts one.
+     * <p>
+     * Held rather than passed anonymously because the channel only frees a factory it created
+     * itself - a supplied one belongs to whoever supplied it, since the peer connections opened
+     * through it outlive the server channel.
+     */
+    private PeerConnectionFactory peerConnectionFactory;
     private final Set<Channel> bridgeClientChannels = ConcurrentHashMap.newKeySet();
 
     private PortAllocatorConfig netherNetPortAllocatorConfig;
@@ -703,7 +711,7 @@ public abstract class SessionManagerCore {
         try {
             ServerBootstrap b = new ServerBootstrap();
             b.group(bossGroup, workerGroup)
-                .channelFactory(NetherNetChannelFactory.server(new PeerConnectionFactory(), signaling))
+                .channelFactory(NetherNetChannelFactory.server(this.peerConnectionFactory = new PeerConnectionFactory(), signaling))
                 .childHandler(new BroadcasterChannelInitializer(this, logger));
 
             PortAllocatorConfig portAllocatorConfig = netherNetPortAllocatorConfig();
@@ -754,6 +762,9 @@ public abstract class SessionManagerCore {
             .channel();
 
         this.bridgeClientChannels.add(channel);
+        // Drop it again when it closes. Without this the set only ever grew: one dead Channel kept
+        // alive per player who has ever joined through the local bridge, until the process stops.
+        channel.closeFuture().addListener(future -> this.bridgeClientChannels.remove(channel));
     }
 
     /**
@@ -789,6 +800,16 @@ public abstract class SessionManagerCore {
         if (workerGroup != null) {
             workerGroup.shutdownGracefully();
             workerGroup = null;
+        }
+        if (peerConnectionFactory != null) {
+            // Last, and only once the channel and its groups are down: freeing the native handle
+            // while a peer connection still runs on it is a use-after-free, not an exception.
+            try {
+                peerConnectionFactory.dispose();
+            } catch (NullPointerException ignored) {
+                // The native handle was never fully initialised.
+            }
+            peerConnectionFactory = null;
         }
     }
 
