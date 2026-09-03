@@ -15,6 +15,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -22,6 +24,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -352,6 +355,7 @@ public class SessionManager extends SessionManagerCore {
         for (Map.Entry<String, String> entry : current.entrySet()) {
             if (!knownMembers.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
                 logger.info(entry.getValue() + " joined the Xbox session (" + current.size() + " members)");
+                recordJoin(entry.getKey(), entry.getValue());
             }
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
@@ -498,6 +502,104 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
+     * Persist a join, then work out in the background which account brought the player in.
+     * <p>
+     * The sub-sessions join the primary's Xbox session rather than creating their own, so there is
+     * only ever one member list and it cannot say which bot a player found the server through. What
+     * it can be derived from is who follows whom: a player only sees the session through an account
+     * they follow. That costs one request per account, so it happens off the session update thread
+     * and only once per player.
+     */
+    private void recordJoin(String xuid, String gamertag) {
+        try {
+            storageManager().joinHistory().record(xuid, gamertag, Instant.now());
+        } catch (IOException e) {
+            logger.debug("Failed to record the join of " + gamertag + ": " + e.getMessage());
+            return;
+        }
+
+        scheduledThread().execute(() -> attributeJoin(xuid, gamertag));
+    }
+
+    /**
+     * Work out which of our accounts the given player follows, and store it against their join.
+     */
+    private void attributeJoin(String xuid, String gamertag) {
+        try {
+            if (storageManager().joinHistory().hasSource(xuid)) {
+                return;
+            }
+
+            List<String> sources = new ArrayList<>();
+            if (friendManager().isFollowedBy(xuid)) {
+                sources.add(getGamertag());
+            }
+            for (SubSessionManager subSessionManager : subSessionManagers.values()) {
+                if (subSessionManager.friendManager().isFollowedBy(xuid)) {
+                    sources.add(subSessionManager.getGamertag());
+                }
+            }
+
+            // "unknown" rather than nothing, so the player is not probed again on every later join:
+            // they reached the session some other way, most likely an invite or a friend of a member.
+            storageManager().joinHistory().source(xuid, sources.isEmpty() ? "unknown" : String.join(", ", sources));
+        } catch (IOException e) {
+            logger.debug("Failed to attribute the join of " + gamertag + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Print how many distinct players have joined recently and which account they came through.
+     * <p>
+     * A player following several of our accounts is counted under all of them together as one
+     * combination, rather than being split arbitrarily between them, because there is no way to
+     * tell which of the two they actually clicked.
+     */
+    public void playerStats() {
+        List<StorageManager.JoinRecord> records;
+        try {
+            records = storageManager().joinHistory().all();
+        } catch (IOException e) {
+            coreLogger.error("Failed to read the join history: " + e.getMessage());
+            return;
+        }
+
+        if (records.isEmpty()) {
+            coreLogger.info("No joins recorded yet.");
+            return;
+        }
+
+        Instant now = Instant.now();
+        List<String> messages = new ArrayList<>();
+        messages.add("Distinct players: " + countSince(records, now, 1) + " in 24h, "
+            + countSince(records, now, 7) + " in 7d, "
+            + countSince(records, now, 30) + " in 30d, "
+            + records.size() + " all time");
+
+        Map<String, Integer> bySource = new TreeMap<>();
+        for (StorageManager.JoinRecord record : records) {
+            String source = record.source() == null || record.source().isBlank()
+                ? "not yet attributed"
+                : record.source();
+            bySource.merge(source, 1, Integer::sum);
+        }
+
+        messages.add("Players by the account they follow:");
+        bySource.entrySet().stream()
+            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+            .forEach(entry -> messages.add(" - " + entry.getKey() + ": " + entry.getValue()));
+
+        for (String message : messages) {
+            coreLogger.info(message);
+        }
+    }
+
+    private static long countSince(List<StorageManager.JoinRecord> records, Instant now, int days) {
+        Instant cutoff = now.minus(Duration.ofDays(days));
+        return records.stream().filter(record -> record.lastJoin().isAfter(cutoff)).count();
+    }
+
+    /**
      * List all sessions and their information
      */
     public void listSessions() {
@@ -517,6 +619,32 @@ public class SessionManager extends SessionManagerCore {
             }
         } else {
             messages.add("No sub-sessions");
+        }
+
+        for (String message : messages) {
+            coreLogger.info(message);
+        }
+    }
+
+    /**
+     * Probe the followers endpoint of every account and print what Xbox answers for each.
+     * <p>
+     * Auto-follow depends on being able to enumerate followers, and that enumeration can break on
+     * one account while every other part of its session keeps working normally. The account goes on
+     * gaining followers and publishing its session, so nothing looks wrong until someone asks it
+     * directly - which is what this does.
+     */
+    public void diagnoseFollowers() {
+        coreLogger.info("Probing the Xbox followers endpoints, this takes a few seconds per account...");
+
+        List<String> messages = new ArrayList<>();
+
+        messages.add("Primary Session (" + getGamertag() + "):");
+        messages.addAll(friendManager().diagnoseFollowers());
+
+        for (Map.Entry<String, SubSessionManager> subSession : subSessionManagers.entrySet()) {
+            messages.add("Sub-Session " + subSession.getKey() + " (" + subSession.getValue().getGamertag() + "):");
+            messages.addAll(subSession.getValue().friendManager().diagnoseFollowers());
         }
 
         for (String message : messages) {

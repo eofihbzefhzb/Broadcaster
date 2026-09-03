@@ -147,6 +147,128 @@ public class FriendManager {
     }
 
     /**
+     * Read-only probe of the followers endpoint variants, used to work out why the default one
+     * refuses to return anything for an account.
+     * <p>
+     * The 1027 failure is a decoration failure: peoplehub hydrates every follower's profile before
+     * it answers, and a single unresolvable profile makes it discard the whole list rather than
+     * skip that one entry. The account then keeps gaining followers it can no longer enumerate, so
+     * auto-follow stops recruiting while the follower count still climbs - which is why the failure
+     * is easy to miss. Asking for a narrower decoration set is the only lever available from
+     * outside, so this tries each variant and reports which ones Xbox is willing to answer.
+     * <p>
+     * Every request here is a GET, so this is safe to run against a live account.
+     *
+     * @return the report lines, already indented for the console
+     */
+    public List<String> diagnoseFollowers() {
+        List<String> report = new ArrayList<>();
+
+        String summary;
+        try {
+            summary = String.valueOf(sessionManager.socialSummary().targetFollowerCount());
+        } catch (Exception e) {
+            summary = "unavailable (" + e.getMessage() + ")";
+        }
+        report.add("   Followers according to the summary endpoint: " + summary);
+
+        String base = Constants.FOLLOWERS.toString();
+        List<String> working = new ArrayList<>();
+
+        for (Probe probe : List.of(
+            new Probe("default, contract 5", base, "5"),
+            new Probe("default, contract 3", base, "3"),
+            new Probe("decoration detail", base + "/decoration/detail", "5"),
+            new Probe("decoration follower", base + "/decoration/follower", "5"),
+            new Probe("decoration detail,preferredColor", base + "/decoration/detail,preferredColor", "5")
+        )) {
+            ProbeResult result = runProbe(probe);
+            report.add("   " + probe.label() + " -> " + result.message());
+            if (result.success()) {
+                working.add(probe.label());
+            }
+        }
+
+        if (working.isEmpty()) {
+            report.add("   No variant returned a list: this account cannot enumerate its followers at all.");
+        } else {
+            report.add("   Usable variant(s): " + String.join(", ", working)
+                + " - auto-follow can be restored by moving this account onto one of them.");
+        }
+
+        return report;
+    }
+
+    private record Probe(String label, String url, String contractVersion) {
+    }
+
+    private record ProbeResult(boolean success, String message) {
+    }
+
+    private ProbeResult runProbe(Probe probe) {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(probe.url()))
+            .header("Authorization", sessionManager.getTokenHeader())
+            .header("x-xbl-contract-version", probe.contractVersion())
+            .header("accept-language", "en-GB")
+            .GET()
+            .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String body = response.body();
+            if (body == null || body.isEmpty()) {
+                return new ProbeResult(false, "HTTP " + response.statusCode() + ", empty body");
+            }
+
+            FollowerResponse parsed = Constants.GSON.fromJson(body, FollowerResponse.class);
+            if (parsed == null) {
+                return new ProbeResult(false, "HTTP " + response.statusCode() + ", unparseable body");
+            }
+            if (parsed.people != null) {
+                return new ProbeResult(true, "HTTP " + response.statusCode() + ", " + parsed.people.size() + " followers");
+            }
+            return new ProbeResult(false, "HTTP " + response.statusCode() + ", " + describe(parsed));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ProbeResult(false, "interrupted");
+        } catch (JsonParseException | IOException e) {
+            return new ProbeResult(false, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Whether the given player follows this account, and can therefore see its session.
+     * <p>
+     * This asks about one player through the social endpoint instead of scanning the followers
+     * list, which matters because the followers list is exactly what fails with code 1027 on some
+     * accounts. Attribution therefore keeps working even on an account that cannot enumerate its
+     * own followers.
+     *
+     * @param xuid the player to check
+     * @return true only on a clear yes; any failure is reported as false rather than guessed
+     */
+    public boolean isFollowedBy(String xuid) {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(Constants.PEOPLE.formatted(xuid)))
+            .header("Authorization", sessionManager.getTokenHeader())
+            .GET()
+            .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            FriendStatusResponse status = Constants.GSON.fromJson(response.body(), FriendStatusResponse.class);
+            return status != null && status.isFollowingCaller();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (JsonParseException | IOException e) {
+            logger.debug("Failed to check whether " + xuid + " follows this account: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Add a friend from xbox live
      *
      * @param xuid The XUID of the friend to add
