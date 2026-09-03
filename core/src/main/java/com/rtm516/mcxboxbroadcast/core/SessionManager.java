@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -48,6 +49,9 @@ public class SessionManager extends SessionManagerCore {
      * access goes through the synchronized logMemberChanges().
      */
     private Map<String, String> knownMembers;
+
+    /** Stops a second followers diagnostic piling more requests onto Xbox while one is running. */
+    private final AtomicBoolean diagnosticsRunning = new AtomicBoolean();
 
     /**
      * Create an instance of SessionManager
@@ -635,20 +639,42 @@ public class SessionManager extends SessionManagerCore {
      * directly - which is what this does.
      */
     public void diagnoseFollowers() {
-        coreLogger.info("Probing the Xbox followers endpoints, this takes a few seconds per account...");
-
-        List<String> messages = new ArrayList<>();
-
-        messages.add("Primary Session (" + getGamertag() + "):");
-        messages.addAll(friendManager().diagnoseFollowers());
-
-        for (Map.Entry<String, SubSessionManager> subSession : subSessionManagers.entrySet()) {
-            messages.add("Sub-Session " + subSession.getKey() + " (" + subSession.getValue().getGamertag() + "):");
-            messages.addAll(subSession.getValue().friendManager().diagnoseFollowers());
+        if (!diagnosticsRunning.compareAndSet(false, true)) {
+            coreLogger.warn("Followers diagnostics are already running.");
+            return;
         }
 
-        for (String message : messages) {
-            coreLogger.info(message);
+        coreLogger.info("Probing the Xbox followers endpoints in the background; each account is "
+            + "reported as it finishes. Allow up to half a minute per account.");
+
+        // Deliberately its own thread rather than the console thread it was typed on, which it
+        // would otherwise block for minutes, and rather than the scheduled pool, which the session
+        // keepalives need. Results are printed as they arrive so a slow account cannot swallow the
+        // ones already done.
+        Thread thread = new Thread(() -> {
+            try {
+                report("Primary Session (" + getGamertag() + "):", friendManager());
+
+                for (Map.Entry<String, SubSessionManager> subSession : subSessionManagers.entrySet()) {
+                    report("Sub-Session " + subSession.getKey() + " (" + subSession.getValue().getGamertag() + "):",
+                        subSession.getValue().friendManager());
+                }
+
+                coreLogger.info("Followers diagnostics finished.");
+            } catch (Exception e) {
+                coreLogger.error("Followers diagnostics failed: " + e.getMessage());
+            } finally {
+                diagnosticsRunning.set(false);
+            }
+        }, "followers-diagnostics");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void report(String heading, FriendManager friendManager) {
+        coreLogger.info(heading);
+        for (String line : friendManager.diagnoseFollowers()) {
+            coreLogger.info(line);
         }
     }
 

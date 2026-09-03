@@ -17,6 +17,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -211,6 +212,9 @@ public class FriendManager {
             .header("Authorization", sessionManager.getTokenHeader())
             .header("x-xbl-contract-version", probe.contractVersion())
             .header("accept-language", "en-GB")
+            // Explicit rather than inherited: several of these URLs are guesses, and one that Xbox
+            // simply never answers must not hold the whole diagnostic open.
+            .timeout(Duration.ofSeconds(5))
             .GET()
             .build();
 
