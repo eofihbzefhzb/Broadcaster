@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -52,6 +53,18 @@ public class SessionManager extends SessionManagerCore {
 
     /** Stops a second followers diagnostic piling more requests onto Xbox while one is running. */
     private final AtomicBoolean diagnosticsRunning = new AtomicBoolean();
+
+    /**
+     * Attribution runs here rather than on the session pool.
+     * <p>
+     * Working out who brought a player in costs one Xbox request per account, so it can take tens
+     * of seconds if Xbox is slow. On the shared pool a burst of joins would occupy several of its
+     * five threads at once and hold up the session keepalives that everything else depends on. A
+     * single thread of its own also serialises the requests, so a burst of arrivals cannot fire
+     * dozens of them at Xbox simultaneously.
+     */
+    private final ExecutorService attributionThread =
+        Executors.newSingleThreadExecutor(new NamedThreadFactory("MCXboxBroadcast Attribution"));
 
     /**
      * Create an instance of SessionManager
@@ -410,6 +423,7 @@ public class SessionManager extends SessionManagerCore {
         // Shutdown self
         super.shutdown();
         scheduledThreadPool.shutdownNow();
+        attributionThread.shutdownNow();
     }
 
     /**
@@ -522,7 +536,7 @@ public class SessionManager extends SessionManagerCore {
             return;
         }
 
-        scheduledThread().execute(() -> attributeJoin(xuid, gamertag));
+        attributionThread.execute(() -> attributeJoin(xuid, gamertag));
     }
 
     /**

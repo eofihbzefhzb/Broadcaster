@@ -21,7 +21,7 @@ public class FileStorageManager implements StorageManager {
     private final String cacheFolder;
     private final String screenshotPath;
     private final PlayerHistoryStorage playerHistoryStorage;
-    private final JoinHistoryStorage joinHistoryStorage;
+    private JoinHistoryStorage joinHistoryStorage;
 
     public FileStorageManager(String cacheFolder, String screenshotPath) {
         this.cacheFolder = cacheFolder;
@@ -34,7 +34,6 @@ public class FileStorageManager implements StorageManager {
         }
 
         this.playerHistoryStorage = new SqlitePlayerHistoryStorage(Paths.get(cacheFolder, "player_history.db"));
-        this.joinHistoryStorage = new SqliteJoinHistoryStorage(Paths.get(cacheFolder, "join_history.db"));
     }
 
     private String read(String file) throws IOException {
@@ -123,7 +122,14 @@ public class FileStorageManager implements StorageManager {
     }
 
     @Override
-    public JoinHistoryStorage joinHistory() {
+    public synchronized JoinHistoryStorage joinHistory() {
+        // Opened on first use rather than in the constructor: every sub-session gets its own
+        // FileStorageManager, but only the root one ever records joins. Opening it eagerly left
+        // each sub-session holding an unused sqlite file, which on Windows also keeps a handle on
+        // the folder that removing a sub-account tries to delete.
+        if (joinHistoryStorage == null) {
+            joinHistoryStorage = new SqliteJoinHistoryStorage(Paths.get(cacheFolder, "join_history.db"));
+        }
         return joinHistoryStorage;
     }
 
