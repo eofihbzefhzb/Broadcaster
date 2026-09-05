@@ -272,16 +272,29 @@ public class FriendManager {
             .GET()
             .build();
 
+        // Held outside the try so the parse failure below can still report what Xbox sent.
+        String body = "";
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            String body = response.body();
+            body = response.body();
             if (body == null || body.isEmpty()) {
                 return new ProbeResult(false, "HTTP " + response.statusCode() + ", empty body");
             }
 
+            // Some variants answer with a bare array instead of the usual {"people": [...]}
+            // wrapper, which is a different shape rather than a failure - so try that too before
+            // calling the probe lost.
+            if (body.stripLeading().startsWith("[")) {
+                FollowerResponse.Person[] people = Constants.GSON.fromJson(body, FollowerResponse.Person[].class);
+                if (people != null) {
+                    return new ProbeResult(true, "HTTP " + response.statusCode() + ", "
+                        + people.length + " followers (bare array)");
+                }
+            }
+
             FollowerResponse parsed = Constants.GSON.fromJson(body, FollowerResponse.class);
             if (parsed == null) {
-                return new ProbeResult(false, "HTTP " + response.statusCode() + ", unparseable body");
+                return new ProbeResult(false, "HTTP " + response.statusCode() + ", unparseable body: " + snippet(body));
             }
             if (parsed.people != null) {
                 return new ProbeResult(true, "HTTP " + response.statusCode() + ", " + parsed.people.size() + " followers");
@@ -290,9 +303,22 @@ public class FriendManager {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new ProbeResult(false, "interrupted");
-        } catch (JsonParseException | IOException e) {
+        } catch (JsonParseException e) {
+            // The message alone says the shape was unexpected but never what Xbox actually sent,
+            // which is the only thing that lets the next variant be written correctly.
+            return new ProbeResult(false, "unexpected shape: " + snippet(body));
+        } catch (IOException e) {
             return new ProbeResult(false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /** First stretch of a response, enough to recognise its shape without flooding the console. */
+    private static String snippet(String body) {
+        if (body == null || body.isEmpty()) {
+            return "<empty>";
+        }
+        String flattened = body.replaceAll("\s+", " ").trim();
+        return flattened.length() <= 200 ? flattened : flattened.substring(0, 200) + "...";
     }
 
     /**
