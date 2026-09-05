@@ -229,7 +229,13 @@ public class FriendManager {
             new Probe("default, contract 3", base, "3"),
             new Probe("decoration detail", base + "/decoration/detail", "5"),
             new Probe("decoration follower", base + "/decoration/follower", "5"),
-            new Probe("decoration detail,preferredColor", base + "/decoration/detail,preferredColor", "5")
+            new Probe("decoration detail,preferredColor", base + "/decoration/detail,preferredColor", "5"),
+            // The list comes back capped around a thousand entries whatever the real follower
+            // count, so anything past that is invisible to auto-follow. These two ask Xbox whether
+            // the page size can be raised; if either returns more than the others, the cap is ours
+            // to lift rather than a hard limit.
+            new Probe("maxItems=2000", base + "?maxItems=2000", "5"),
+            new Probe("maxItems=5000", base + "?maxItems=5000", "5")
         )) {
             ProbeResult result = runProbe(probe);
             report.add("   " + probe.label() + " -> " + result.message());
