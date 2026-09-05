@@ -241,7 +241,7 @@ public class StandaloneMain {
         if (config.netherNet().externalHosted()
             && config.netherNet().externalNetworkId().isBlank()
             && !hasReadyExternalNetworkStatus()) {
-            sessionManager.markUnhealthy("Geyser NetherNet status is missing, stale, or not ready");
+
             logger.warn("Geyser NetherNet status is not ready; keeping the Xbox session unchanged until Geyser is ready.");
             return false;
         }

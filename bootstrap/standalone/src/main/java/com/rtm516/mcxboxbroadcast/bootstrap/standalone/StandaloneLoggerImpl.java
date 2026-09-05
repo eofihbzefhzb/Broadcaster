@@ -88,14 +88,6 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("Dumping session responses to 'lastSessionResponse.json' and 'currentSessionResponse.json'");
                     StandaloneMain.sessionManager.dumpSession();
                 }
-                case "status", "health" -> {
-                    if (StandaloneMain.sessionManager == null) {
-                        warn("Session publishing is disabled.");
-                        return;
-                    }
-                    info(StandaloneMain.sessionManager.statusSummary());
-                }
-
                 case "accounts" -> {
                     if (StandaloneMain.sessionManager == null) {
                         warn("Session publishing is disabled.");
@@ -121,8 +113,6 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("exit - Exit the application");
                     info("restart - Restart the application");
                     info("dumpsession - Dump the current session to json files");
-                    info("status - Show session, NetherNet, PmsgId, and health state");
-
                     info("accounts list - List sub-accounts");
                     info("accounts add <sub-session-id> - Add a sub-account");
                     info("accounts remove <sub-session-id> - Remove a sub-account");

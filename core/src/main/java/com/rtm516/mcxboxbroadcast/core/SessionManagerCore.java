@@ -39,7 +39,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -68,10 +67,6 @@ public abstract class SessionManagerCore {
 
     protected boolean initialized = false;
 
-    private volatile Instant lastSuccessfulSessionUpdate;
-    private volatile String lastSessionError = "none";
-    private volatile int consecutiveSessionFailures;
-    private volatile boolean sessionHealthy = true;
 
     private Channel netherNetChannel;
     private EventLoopGroup bossGroup;
@@ -415,12 +410,10 @@ public abstract class SessionManagerCore {
                     sleepBeforeRetry(attempt, 0);
                     continue;
                 }
-                markSessionUpdateFailure(lastFailure);
                 throw new SessionUpdateException(lastFailure);
             }
 
             if (createSessionResponse.statusCode() == 200 || createSessionResponse.statusCode() == 201) {
-                markSessionUpdateSuccess();
                 // Keep a live, sanitized-by-construction copy of the Xbox session
                 // response. This is used by the local harness and diagnostics; it
                 // contains the API response only and never request headers/tokens.
@@ -457,11 +450,9 @@ public abstract class SessionManagerCore {
             }
 
             logger.warn("Xbox session update failed: " + lastFailure);
-            markSessionUpdateFailure(lastFailure);
             throw new SessionUpdateException(lastFailure);
         }
 
-        markSessionUpdateFailure(lastFailure);
         throw new SessionUpdateException(lastFailure);
     }
 
@@ -473,47 +464,8 @@ public abstract class SessionManagerCore {
             Thread.sleep(delaySeconds * 1000L);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            markSessionUpdateFailure("Interrupted while waiting to retry session update");
             throw new SessionUpdateException("Interrupted while waiting to retry session update");
         }
-    }
-
-    protected void markSessionUpdateSuccess() {
-        lastSuccessfulSessionUpdate = Instant.now();
-        lastSessionError = "none";
-        consecutiveSessionFailures = 0;
-        sessionHealthy = true;
-    }
-
-    protected void markSessionUpdateFailure(String message) {
-        lastSessionError = message == null || message.isBlank() ? "unknown update failure" : message;
-        consecutiveSessionFailures++;
-        if (consecutiveSessionFailures >= 3) {
-            sessionHealthy = false;
-        }
-    }
-
-    public boolean isSessionHealthy() {
-        return sessionHealthy;
-    }
-
-    public void markUnhealthy(String reason) {
-        sessionHealthy = false;
-        markSessionUpdateFailure(reason);
-    }
-
-    public String statusSummary() {
-        String id = sessionInfo == null ? "<none>" : sessionInfo.getSessionId();
-        String netherNetId = sessionInfo == null || sessionInfo.getNetherNetId() == null
-            ? "<none>" : sessionInfo.getNetherNetId().toString();
-        boolean pmsgPresent = sessionInfo != null && sessionInfo.getPmsgId() != null && !sessionInfo.getPmsgId().isBlank();
-        return "healthy=" + sessionHealthy
-            + ", sessionId=" + id
-            + ", netherNetId=" + netherNetId
-            + ", pmsgIdPresent=" + pmsgPresent
-            + ", lastUpdate=" + (lastSuccessfulSessionUpdate == null ? "never" : lastSuccessfulSessionUpdate)
-            + ", consecutiveFailures=" + consecutiveSessionFailures
-            + ", lastError=" + lastSessionError;
     }
 
     /**
