@@ -52,18 +52,6 @@ import java.util.function.Consumer;
  * Simple manager to authenticate and create sessions on Xbox
  */
 public abstract class SessionManagerCore {
-    /**
-     * How many times the startup friends-list request is tried before giving up on it.
-     * <p>
-     * Deliberately small, because each attempt already walks every followers endpoint variant
-     * internally. This loop was sized back when an attempt meant a single request; multiplying the
-     * two pushed a struggling account to around eighty seconds of timeouts, and since accounts start
-     * one after another that stretched a ninety second startup to nearly four minutes. Two passes
-     * still catch the common case of an account that answers a moment later.
-     */
-    private static final int FRIENDS_QUERY_ATTEMPTS = 2;
-    /** Gap between those attempts. Xbox usually answers correctly on the second one. */
-    private static final long FRIENDS_QUERY_RETRY_DELAY_MS = 2000;
 
     private final AuthManager authManager;
     private final FriendManager friendManager;
@@ -218,83 +206,7 @@ public abstract class SessionManagerCore {
             return;
         }
 
-        int friendCount = -1;
-        String friendQueryFailure = null;
-        if (shouldQueryFriendsOnStartup()) {
-            // Xbox very often rejects the first friends request made right after authenticating -
-            // "code=1027 Failed to hydrate one or more users", or a plain timeout - and then answers
-            // the same request correctly a few seconds later. Retrying here keeps auto-follow and
-            // invitations working from the start instead of waiting for the next periodic sync.
-            long retryDelay = FRIENDS_QUERY_RETRY_DELAY_MS;
-            for (int attempt = 1; attempt <= FRIENDS_QUERY_ATTEMPTS; attempt++) {
-                try {
-                    friendCount = friendManager.get().size();
-                    friendQueryFailure = null;
-                    break;
-                } catch (Exception exception) {
-                    // Never report a failure as a count. Xbox answers a failed lookup with an error
-                    // object rather than an HTTP error, and printing "1/2000" for an account that
-                    // really has over a thousand followers reads as a catastrophic loss of reach
-                    // rather than as the transient hiccup it usually is.
-                    friendQueryFailure = exception.getMessage() == null ? "unknown error" : exception.getMessage();
-
-                    // Every failure here is worth retrying, 1027 included. That was once treated as
-                    // permanent, on the assumption that it meant one unresolvable follower; the
-                    // followers diagnostics disproved it, showing the same account failing and
-                    // succeeding across attempts. Giving up on it was throwing away lists Xbox
-                    // would have returned on the next try.
-                    if (attempt == FRIENDS_QUERY_ATTEMPTS) {
-                        break;
-                    }
-                    logger.debug("Friends list request failed (attempt " + attempt + "/" + FRIENDS_QUERY_ATTEMPTS
-                        + "), retrying in " + retryDelay + "ms: " + friendQueryFailure);
-                    try {
-                        Thread.sleep(retryDelay);
-                    } catch (InterruptedException interrupted) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                    retryDelay *= 2;
-                }
-            }
-        } else {
-            logger.info("Friend synchronization is disabled; skipping the startup friends-list request.");
-        }
-
-        // peoplehub hydrates every profile in the list and refuses the whole thing when one of them
-        // cannot be resolved - a deleted, banned or private follower is enough. The summary endpoint
-        // is a different service that only counts, so it still answers. Use it rather than admit to
-        // knowing nothing: the number is real, it is only the list itself we could not read.
-        boolean countFromSummary = false;
-        if (shouldQueryFriendsOnStartup() && friendQueryFailure != null) {
-            try {
-                SocialSummaryResponse summary = socialSummary();
-                if (summary != null) {
-                    friendCount = summary.targetFollowingCount();
-                    countFromSummary = true;
-                }
-            } catch (Exception ignored) {
-                // Leave the count unknown; the warning below still explains why.
-            }
-        }
-
-        String friendSummary;
-        if (!shouldQueryFriendsOnStartup()) {
-            friendSummary = "not queried";
-        } else if (friendQueryFailure != null && !countFromSummary) {
-            friendSummary = "an unknown number of";
-        } else {
-            friendSummary = friendCount + "/" + Constants.MAX_FRIENDS;
-        }
-        logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendSummary + " friends");
-        if (friendQueryFailure != null) {
-            // Name the reason rather than hiding it behind debug: it is the only way to tell a run
-            // of bad luck from an account that never manages to list its followers at all.
-            logger.warn("Auto-follow is stalled for this run: Xbox would not return the followers"
-                + " list on any endpoint variant (" + friendQueryFailure + ")"
-                + (countFromSummary ? ". The count above comes from the summary endpoint." : "")
-                + " The next periodic sync will try again.");
-        }
+        logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ")");
 
         if (handleFriendship()) {
             logger.info("Waiting for friendship to be processed...");
@@ -336,13 +248,6 @@ public abstract class SessionManagerCore {
      */
     protected abstract boolean handleFriendship();
 
-    /**
-     * Whether startup should make a People API request. Session publishing does
-     * not require a friends-list request, so safe publisher configurations skip it.
-     */
-    protected boolean shouldQueryFriendsOnStartup() {
-        return true;
-    }
 
     /**
      * Setup a new session and its prerequisites

@@ -129,24 +129,6 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                         default -> warn("Unknown accounts command: " + args[0]);
                     }
                 }
-                case "stats" -> {
-                    if (StandaloneMain.sessionManager == null) {
-                        warn("Session publishing is disabled.");
-                        return;
-                    }
-                    StandaloneMain.sessionManager.playerStats();
-                }
-                case "friends" -> {
-                    if (StandaloneMain.sessionManager == null) {
-                        warn("Session publishing is disabled.");
-                        return;
-                    }
-                    if (args.length == 0 || !args[0].equalsIgnoreCase("diagnose")) {
-                        warn("Usage: friends diagnose");
-                        return;
-                    }
-                    StandaloneMain.sessionManager.diagnoseFollowers();
-                }
                 case "version" -> info("MCXboxBroadcast Standalone " + BuildData.VERSION);
                 case "help" -> {
                     info("Available commands:");
@@ -158,8 +140,6 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("accounts list - List sub-accounts");
                     info("accounts add <sub-session-id> - Add a sub-account");
                     info("accounts remove <sub-session-id> - Remove a sub-account");
-                    info("friends diagnose - Probe why an account cannot list its followers");
-                    info("stats - Show distinct players joined and which account brought them");
                     info("version - Display the version");
                 }
                 default -> warn("Unknown command: " + commandNode);

@@ -15,8 +15,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -24,10 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -40,7 +35,6 @@ public class SessionManager extends SessionManagerCore {
     private final Map<String, SubSessionManager> subSessionManagers;
 
     private CoreConfig.FriendSyncConfig friendSyncConfig;
-    private boolean queryFriendsOnStartup = true;
     private Runnable restartCallback;
 
     private Map<String, String> nonces;
@@ -50,21 +44,6 @@ public class SessionManager extends SessionManagerCore {
      * access goes through the synchronized logMemberChanges().
      */
     private Map<String, String> knownMembers;
-
-    /** Stops a second followers diagnostic piling more requests onto Xbox while one is running. */
-    private final AtomicBoolean diagnosticsRunning = new AtomicBoolean();
-
-    /**
-     * Attribution runs here rather than on the session pool.
-     * <p>
-     * Working out who brought a player in costs one Xbox request per account, so it can take tens
-     * of seconds if Xbox is slow. On the shared pool a burst of joins would occupy several of its
-     * five threads at once and hold up the session keepalives that everything else depends on. A
-     * single thread of its own also serialises the requests, so a burst of arrivals cannot fire
-     * dozens of them at Xbox simultaneously.
-     */
-    private final ExecutorService attributionThread =
-        Executors.newSingleThreadExecutor(new NamedThreadFactory("MCXboxBroadcast Attribution"));
 
     /**
      * Create an instance of SessionManager
@@ -138,10 +117,6 @@ public class SessionManager extends SessionManagerCore {
     public boolean init(SessionInfo sessionInfo, CoreConfig.FriendSyncConfig friendSyncConfig) throws SessionCreationException, SessionUpdateException {
         // Set the internal session information based on the session info
         this.sessionInfo = new ExpandedSessionInfo("", "", sessionInfo);
-        this.queryFriendsOnStartup = friendSyncConfig.autoFollow()
-            || friendSyncConfig.autoUnfollow()
-            || friendSyncConfig.initialInvite()
-            || friendSyncConfig.expiry().enabled();
 
         super.init();
 
@@ -196,10 +171,6 @@ public class SessionManager extends SessionManagerCore {
         return false;
     }
 
-    @Override
-    protected boolean shouldQueryFriendsOnStartup() {
-        return queryFriendsOnStartup;
-    }
 
     /**
      * Update the current session with new information
@@ -372,7 +343,6 @@ public class SessionManager extends SessionManagerCore {
         for (Map.Entry<String, String> entry : current.entrySet()) {
             if (!knownMembers.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
                 logger.info(entry.getValue() + " joined the Xbox session (" + current.size() + " members)");
-                recordJoin(entry.getKey(), entry.getValue());
             }
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
@@ -423,7 +393,6 @@ public class SessionManager extends SessionManagerCore {
         // Shutdown self
         super.shutdown();
         scheduledThreadPool.shutdownNow();
-        attributionThread.shutdownNow();
     }
 
     /**
@@ -520,104 +489,6 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
-     * Persist a join, then work out in the background which account brought the player in.
-     * <p>
-     * The sub-sessions join the primary's Xbox session rather than creating their own, so there is
-     * only ever one member list and it cannot say which bot a player found the server through. What
-     * it can be derived from is who follows whom: a player only sees the session through an account
-     * they follow. That costs one request per account, so it happens off the session update thread
-     * and only once per player.
-     */
-    private void recordJoin(String xuid, String gamertag) {
-        try {
-            storageManager().joinHistory().record(xuid, gamertag, Instant.now());
-        } catch (IOException e) {
-            logger.debug("Failed to record the join of " + gamertag + ": " + e.getMessage());
-            return;
-        }
-
-        attributionThread.execute(() -> attributeJoin(xuid, gamertag));
-    }
-
-    /**
-     * Work out which of our accounts the given player follows, and store it against their join.
-     */
-    private void attributeJoin(String xuid, String gamertag) {
-        try {
-            if (storageManager().joinHistory().hasSource(xuid)) {
-                return;
-            }
-
-            List<String> sources = new ArrayList<>();
-            if (friendManager().isFollowedBy(xuid)) {
-                sources.add(getGamertag());
-            }
-            for (SubSessionManager subSessionManager : subSessionManagers.values()) {
-                if (subSessionManager.friendManager().isFollowedBy(xuid)) {
-                    sources.add(subSessionManager.getGamertag());
-                }
-            }
-
-            // "unknown" rather than nothing, so the player is not probed again on every later join:
-            // they reached the session some other way, most likely an invite or a friend of a member.
-            storageManager().joinHistory().source(xuid, sources.isEmpty() ? "unknown" : String.join(", ", sources));
-        } catch (IOException e) {
-            logger.debug("Failed to attribute the join of " + gamertag + ": " + e.getMessage());
-        }
-    }
-
-    /**
-     * Print how many distinct players have joined recently and which account they came through.
-     * <p>
-     * A player following several of our accounts is counted under all of them together as one
-     * combination, rather than being split arbitrarily between them, because there is no way to
-     * tell which of the two they actually clicked.
-     */
-    public void playerStats() {
-        List<StorageManager.JoinRecord> records;
-        try {
-            records = storageManager().joinHistory().all();
-        } catch (IOException e) {
-            coreLogger.error("Failed to read the join history: " + e.getMessage());
-            return;
-        }
-
-        if (records.isEmpty()) {
-            coreLogger.info("No joins recorded yet.");
-            return;
-        }
-
-        Instant now = Instant.now();
-        List<String> messages = new ArrayList<>();
-        messages.add("Distinct players: " + countSince(records, now, 1) + " in 24h, "
-            + countSince(records, now, 7) + " in 7d, "
-            + countSince(records, now, 30) + " in 30d, "
-            + records.size() + " all time");
-
-        Map<String, Integer> bySource = new TreeMap<>();
-        for (StorageManager.JoinRecord record : records) {
-            String source = record.source() == null || record.source().isBlank()
-                ? "not yet attributed"
-                : record.source();
-            bySource.merge(source, 1, Integer::sum);
-        }
-
-        messages.add("Players by the account they follow:");
-        bySource.entrySet().stream()
-            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-            .forEach(entry -> messages.add(" - " + entry.getKey() + ": " + entry.getValue()));
-
-        for (String message : messages) {
-            coreLogger.info(message);
-        }
-    }
-
-    private static long countSince(List<StorageManager.JoinRecord> records, Instant now, int days) {
-        Instant cutoff = now.minus(Duration.ofDays(days));
-        return records.stream().filter(record -> record.lastJoin().isAfter(cutoff)).count();
-    }
-
-    /**
      * List all sessions and their information
      */
     public void listSessions() {
@@ -641,54 +512,6 @@ public class SessionManager extends SessionManagerCore {
 
         for (String message : messages) {
             coreLogger.info(message);
-        }
-    }
-
-    /**
-     * Probe the followers endpoint of every account and print what Xbox answers for each.
-     * <p>
-     * Auto-follow depends on being able to enumerate followers, and that enumeration can break on
-     * one account while every other part of its session keeps working normally. The account goes on
-     * gaining followers and publishing its session, so nothing looks wrong until someone asks it
-     * directly - which is what this does.
-     */
-    public void diagnoseFollowers() {
-        if (!diagnosticsRunning.compareAndSet(false, true)) {
-            coreLogger.warn("Followers diagnostics are already running.");
-            return;
-        }
-
-        coreLogger.info("Probing the Xbox followers endpoints in the background; each account is "
-            + "reported as it finishes. Allow up to half a minute per account.");
-
-        // Deliberately its own thread rather than the console thread it was typed on, which it
-        // would otherwise block for minutes, and rather than the scheduled pool, which the session
-        // keepalives need. Results are printed as they arrive so a slow account cannot swallow the
-        // ones already done.
-        Thread thread = new Thread(() -> {
-            try {
-                report("Primary Session (" + getGamertag() + "):", friendManager());
-
-                for (Map.Entry<String, SubSessionManager> subSession : subSessionManagers.entrySet()) {
-                    report("Sub-Session " + subSession.getKey() + " (" + subSession.getValue().getGamertag() + "):",
-                        subSession.getValue().friendManager());
-                }
-
-                coreLogger.info("Followers diagnostics finished.");
-            } catch (Exception e) {
-                coreLogger.error("Followers diagnostics failed: " + e.getMessage());
-            } finally {
-                diagnosticsRunning.set(false);
-            }
-        }, "followers-diagnostics");
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    private void report(String heading, FriendManager friendManager) {
-        coreLogger.info(heading);
-        for (String line : friendManager.diagnoseFollowers()) {
-            coreLogger.info(line);
         }
     }
 

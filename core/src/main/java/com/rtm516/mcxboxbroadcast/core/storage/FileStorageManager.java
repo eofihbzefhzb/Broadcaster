@@ -7,13 +7,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -21,7 +17,6 @@ public class FileStorageManager implements StorageManager {
     private final String cacheFolder;
     private final String screenshotPath;
     private final PlayerHistoryStorage playerHistoryStorage;
-    private JoinHistoryStorage joinHistoryStorage;
 
     public FileStorageManager(String cacheFolder, String screenshotPath) {
         this.cacheFolder = cacheFolder;
@@ -119,109 +114,6 @@ public class FileStorageManager implements StorageManager {
     @Override
     public PlayerHistoryStorage playerHistory() {
         return playerHistoryStorage;
-    }
-
-    @Override
-    public synchronized JoinHistoryStorage joinHistory() {
-        // Opened on first use rather than in the constructor: every sub-session gets its own
-        // FileStorageManager, but only the root one ever records joins. Opening it eagerly left
-        // each sub-session holding an unused sqlite file, which on Windows also keeps a handle on
-        // the folder that removing a sub-account tries to delete.
-        if (joinHistoryStorage == null) {
-            joinHistoryStorage = new SqliteJoinHistoryStorage(Paths.get(cacheFolder, "join_history.db"));
-        }
-        return joinHistoryStorage;
-    }
-
-    /**
-     * Uses prepared statements throughout, unlike the player history above, because gamertags are
-     * free text and an apostrophe in one would otherwise break the statement.
-     */
-    public static class SqliteJoinHistoryStorage implements JoinHistoryStorage {
-        private Connection connection;
-
-        public SqliteJoinHistoryStorage(Path dbFile) {
-            try {
-                Class.forName("org.sqlite.JDBC");
-
-                connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile);
-
-                try (Statement createJoinsTable = connection.createStatement()) {
-                    createJoinsTable.executeUpdate("CREATE TABLE IF NOT EXISTS joins ("
-                        + "xuid VARCHAR(32) PRIMARY KEY, gamertag TEXT, firstJoin INTEGER, "
-                        + "lastJoin INTEGER, joinCount INTEGER, source TEXT);");
-                }
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to setup join history database", e);
-            }
-        }
-
-        @Override
-        public void record(String xuid, String gamertag, Instant when) throws IOException {
-            long epoch = when.getEpochSecond();
-            try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO joins (xuid, gamertag, firstJoin, lastJoin, joinCount) VALUES (?, ?, ?, ?, 1) "
-                    + "ON CONFLICT(xuid) DO UPDATE SET gamertag = excluded.gamertag, "
-                    + "lastJoin = excluded.lastJoin, joinCount = joinCount + 1;")) {
-                statement.setString(1, xuid);
-                statement.setString(2, gamertag);
-                statement.setLong(3, epoch);
-                statement.setLong(4, epoch);
-                statement.executeUpdate();
-            } catch (Exception e) {
-                throw new IOException("Failed to record the join of xuid: " + xuid, e);
-            }
-        }
-
-        @Override
-        public void source(String xuid, String source) throws IOException {
-            try (PreparedStatement statement = connection.prepareStatement(
-                "UPDATE joins SET source = ? WHERE xuid = ?;")) {
-                statement.setString(1, source);
-                statement.setString(2, xuid);
-                statement.executeUpdate();
-            } catch (Exception e) {
-                throw new IOException("Failed to store the source of xuid: " + xuid, e);
-            }
-        }
-
-        @Override
-        public boolean hasSource(String xuid) throws IOException {
-            try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT source FROM joins WHERE xuid = ?;")) {
-                statement.setString(1, xuid);
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    if (!resultSet.next()) {
-                        return false;
-                    }
-                    String source = resultSet.getString("source");
-                    return source != null && !source.isBlank();
-                }
-            } catch (Exception e) {
-                throw new IOException("Failed to read the source of xuid: " + xuid, e);
-            }
-        }
-
-        @Override
-        public List<JoinRecord> all() throws IOException {
-            try (Statement statement = connection.createStatement();
-                 ResultSet resultSet = statement.executeQuery(
-                     "SELECT xuid, gamertag, firstJoin, lastJoin, joinCount, source FROM joins;")) {
-                List<JoinRecord> records = new ArrayList<>();
-                while (resultSet.next()) {
-                    records.add(new JoinRecord(
-                        resultSet.getString("xuid"),
-                        resultSet.getString("gamertag"),
-                        Instant.ofEpochSecond(resultSet.getLong("firstJoin")),
-                        Instant.ofEpochSecond(resultSet.getLong("lastJoin")),
-                        resultSet.getInt("joinCount"),
-                        resultSet.getString("source")));
-                }
-                return records;
-            } catch (Exception e) {
-                throw new IOException("Failed to read the join history", e);
-            }
-        }
     }
 
     public class SqlitePlayerHistoryStorage implements PlayerHistoryStorage {
