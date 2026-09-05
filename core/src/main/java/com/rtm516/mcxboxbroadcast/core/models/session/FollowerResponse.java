@@ -5,14 +5,6 @@ import java.util.List;
 
 public class FollowerResponse {
     public List<Person> people;
-    /**
-     * Xbox returns an error object instead of the list when it cannot resolve every user, e.g.
-     * {@code {"code":1027,"description":"Failed to hydrate one or more users"}}. Deserialising that
-     * yields a null {@link #people}, which used to be indistinguishable from an account that simply
-     * has no friends.
-     */
-    public Integer code;
-    public String description;
     public Object recommendationSummary;
     public Object friendFinderState;
     public Object accountLinkDetails;

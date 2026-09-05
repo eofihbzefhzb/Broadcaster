@@ -29,8 +29,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class FriendManager {
-    private static final long MANUAL_INVITE_COOLDOWN_MILLIS = 10_000L;
-
     private final HttpClient httpClient;
     private final Logger logger;
     private final SessionManagerCore sessionManager;
@@ -41,7 +39,6 @@ public class FriendManager {
     private Future<?> internalScheduledFuture;
     private boolean initialInvite;
     private boolean shouldAcceptPendingRequests = true;
-    private volatile long lastManualInviteAt;
 
     public FriendManager(HttpClient httpClient, Logger logger, SessionManagerCore sessionManager) {
         this.httpClient = httpClient;
@@ -61,7 +58,32 @@ public class FriendManager {
     public List<FollowerResponse.Person> get() throws XboxFriendsException {
         List<FollowerResponse.Person> people = new ArrayList<>();
 
-        people.addAll(fetchFollowers());
+        // Create the request for getting the people following us and friends
+        HttpRequest xboxFollowersRequest = HttpRequest.newBuilder()
+            .uri(Constants.FOLLOWERS)
+            .header("Authorization", sessionManager.getTokenHeader())
+            .header("x-xbl-contract-version", "5")
+            .header("accept-language", "en-GB")
+            .GET()
+            .build();
+
+        String lastResponse = "";
+        try {
+            // Get the list of friends from the api
+            lastResponse = httpClient.send(xboxFollowersRequest, HttpResponse.BodyHandlers.ofString()).body();
+
+            // We sometimes get an empty response so don't try and parse it
+            if (!lastResponse.isEmpty()) {
+                FollowerResponse xboxFollowerResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
+
+                if (xboxFollowerResponse.people != null) {
+                    people.addAll(xboxFollowerResponse.people);
+                }
+            }
+        } catch (JsonParseException | IOException | InterruptedException e) {
+            logger.debug("Follower request response: " + lastResponse);
+            throw new XboxFriendsException(e.getMessage());
+        }
 
         // Create the request for getting the people we are following and friends
         HttpRequest xboxSocialRequest = HttpRequest.newBuilder()
@@ -72,21 +94,18 @@ public class FriendManager {
             .GET()
             .build();
 
-        String lastResponse = "";
         try {
             // Get the list of people we are following from the api
             lastResponse = httpClient.send(xboxSocialRequest, HttpResponse.BodyHandlers.ofString()).body();
 
             // We sometimes get an empty response so don't try and parse it
-            if (lastResponse.isEmpty()) {
-                throw new XboxFriendsException("the social request returned an empty body");
-            }
+            if (!lastResponse.isEmpty()) {
+                FollowerResponse xboxSocialResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
 
-            FollowerResponse xboxSocialResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
-            if (xboxSocialResponse.people == null) {
-                throw new XboxFriendsException("the social request returned no list - " + describe(xboxSocialResponse));
+                if (xboxSocialResponse.people != null) {
+                    people.addAll(xboxSocialResponse.people);
+                }
             }
-            people.addAll(xboxSocialResponse.people);
         } catch (JsonParseException | IOException | InterruptedException e) {
             logger.debug("Social request response: " + lastResponse);
             throw new XboxFriendsException(e.getMessage());
@@ -105,93 +124,6 @@ public class FriendManager {
         List<FollowerResponse.Person> outPeopleList = new ArrayList<>(outPeople.values());
         lastFriendCache = outPeopleList;
         return outPeopleList;
-    }
-
-    /**
-     * Describes why a response carried no list, for the exception message.
-     * <p>
-     * Xbox answers with an error object rather than an HTTP error in this case, so the reason is
-     * only ever visible here.
-     */
-    /**
-     * Followers endpoint variants, tried in turn until one of them answers.
-     * <p>
-     * Xbox fails this request intermittently with "code=1027 Failed to hydrate one or more users".
-     * The diagnostics showed that failure is not a property of the account: one account answered on
-     * detail,preferredColor while failing the other four, another answered on those four while
-     * failing detail,preferredColor, and a third timed out on one variant and answered on the rest.
-     * A single unresolvable follower would have failed every variant equally on every run, so this
-     * is a flaky backend rather than broken data, and rotating through the variants turns a request
-     * that fails often into one that usually gets an answer.
-     */
-    private static final List<String> FOLLOWERS_VARIANTS = List.of(
-        "",
-        "/decoration/detail",
-        "/decoration/follower",
-        "/decoration/detail,preferredColor"
-    );
-
-    /** Whichever variant answered last, tried first so the normal case still costs one request. */
-    private volatile String preferredFollowersVariant = "";
-
-    /**
-     * Fetch the followers list, moving on to the next variant whenever Xbox refuses one.
-     *
-     * @return the followers, from the first variant that returned a list
-     * @throws XboxFriendsException if every variant failed
-     */
-    private List<FollowerResponse.Person> fetchFollowers() throws XboxFriendsException {
-        List<String> variants = new ArrayList<>(FOLLOWERS_VARIANTS);
-        String preferred = this.preferredFollowersVariant;
-        if (variants.remove(preferred)) {
-            variants.add(0, preferred);
-        }
-
-        String lastFailure = "the followers request was never attempted";
-        for (String variant : variants) {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(Constants.FOLLOWERS + variant))
-                .header("Authorization", sessionManager.getTokenHeader())
-                .header("x-xbl-contract-version", "5")
-                .header("accept-language", "en-GB")
-                .GET()
-                .build();
-
-            String body = "";
-            try {
-                body = httpClient.send(request, HttpResponse.BodyHandlers.ofString()).body();
-
-                if (body == null || body.isEmpty()) {
-                    lastFailure = "the followers request returned an empty body";
-                    continue;
-                }
-
-                FollowerResponse response = Constants.GSON.fromJson(body, FollowerResponse.class);
-                if (response == null || response.people == null) {
-                    lastFailure = "the followers request returned no list - "
-                        + (response == null ? "unparseable body" : describe(response));
-                    continue;
-                }
-
-                this.preferredFollowersVariant = variant;
-                return response.people;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new XboxFriendsException("the followers request was interrupted");
-            } catch (JsonParseException | IOException e) {
-                logger.debug("Followers request failed on variant '" + variant + "': " + body);
-                lastFailure = e.getClass().getSimpleName() + ": " + e.getMessage();
-            }
-        }
-
-        throw new XboxFriendsException(lastFailure);
-    }
-
-    private static String describe(FollowerResponse response) {
-        if (response.code != null || response.description != null) {
-            return "Xbox replied code=" + response.code + " description=" + response.description;
-        }
-        return "the response contained no people array and no error code";
     }
 
     /**
@@ -373,8 +305,7 @@ public class FriendManager {
                         }
                     }
                 } catch (Exception e) {
-                    // SILENCÉ : Concaténation compatible avec le logger personnalisé
-                    logger.debug("Failed to sync friends: " + e.getMessage());
+                    logger.error("Failed to sync friends", e);
                 }
             }, friendSyncConfig.updateInterval(), friendSyncConfig.updateInterval(), TimeUnit.SECONDS);
         }
@@ -442,7 +373,7 @@ public class FriendManager {
 
                         // Let the user know we added a friend
                         logger.info("Added " + entry.getValue() + " (" + entry.getKey() + ") as a friend");
-                        sendInviteIfEnabled(entry.getKey());
+                        sendInvite(entry.getKey());
 
                         // Update the user in the cache
                         Optional<FollowerResponse.Person> friend = lastFriendCache.stream().filter(p -> p.xuid.equals(entry.getKey())).findFirst();
@@ -594,12 +525,8 @@ public class FriendManager {
                 // If the cache is empty then get the current friends from Xbox Live
                 lastFriendCache = get();
             } catch (XboxFriendsException e) {
-                // Do not cache the failure. Xbox returns code=1027 transiently - often on the very
-                // first request after authenticating - and storing an empty list here made a single
-                // hiccup permanent: the field stops being null, so every later call answered "no
-                // friends" without ever retrying, for the rest of the process's life.
-                logger.error("Failed to get friends from Xbox Live, will retry on the next request", e);
-                return new ArrayList<>();
+                logger.error("Failed to get friends from Xbox Live", e);
+                lastFriendCache = new ArrayList<>();
             }
         }
 
@@ -667,7 +594,7 @@ public class FriendManager {
                     continue;
                 }
                 logger.info("Added " + friend.get().gamertag + " (" + xuid + ") as a friend");
-                sendInviteIfEnabled(xuid);
+                sendInvite(xuid);
             }
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to accept friend requests", e);
@@ -679,44 +606,12 @@ public class FriendManager {
      *
      * @param xuid The XUID of the user to invite
      */
-    public boolean sendInvite(String xuid) {
-        String normalizedXuid = normalizeXuid(xuid);
-        if (normalizedXuid == null) {
-            logger.warn("Refusing to send invitation: invalid XUID '" + xuid + "'.");
-            return false;
-        }
-
-        if (!sessionManager.isSessionHealthy()) {
-            logger.warn("Refusing to send invitation to XUID " + normalizedXuid + ": Xbox session is unhealthy. Use status for details.");
-            return false;
-        }
-
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastManualInviteAt;
-        if (elapsed >= 0 && elapsed < MANUAL_INVITE_COOLDOWN_MILLIS) {
-            long remaining = (MANUAL_INVITE_COOLDOWN_MILLIS - elapsed + 999) / 1000;
-            logger.warn("Refusing to send invitation to XUID " + normalizedXuid + ": manual invite cooldown is active for " + remaining + " more seconds.");
-            return false;
-        }
-
-        lastManualInviteAt = now;
-        return sendInviteRequest(normalizedXuid);
-    }
-
-    private void sendInviteIfEnabled(String xuid) {
-        if (!initialInvite || !sessionManager.isSessionHealthy()) {
+    public void sendInvite(String xuid) {
+        // Only invite if enabled
+        if (!initialInvite) {
             return;
         }
 
-        String normalizedXuid = normalizeXuid(xuid);
-        if (normalizedXuid == null) {
-            logger.warn("Refusing automatic invitation: invalid XUID '" + xuid + "'.");
-            return;
-        }
-        sendInviteRequest(normalizedXuid);
-    }
-
-    private boolean sendInviteRequest(String xuid) {
         try {
             CreateHandleRequest createHandleContent = new CreateHandleRequest(
                 1,
@@ -738,29 +633,9 @@ public class FriendManager {
                 .build();
 
             HttpResponse<String> inviteResponse = httpClient.send(sendInvite, HttpResponse.BodyHandlers.ofString());
-            if (inviteResponse.statusCode() >= 200 && inviteResponse.statusCode() < 300) {
-                logger.info("Sent session invitation to XUID " + xuid);
-                return true;
-            } else {
-                logger.warn("Failed to send session invitation to XUID " + xuid + ": HTTP " + inviteResponse.statusCode());
-                logger.debug(inviteResponse.body());
-            }
+            logger.debug(inviteResponse.body());
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to send invite to " + xuid + ": " + e.getMessage());
-        }
-        return false;
-    }
-
-    private static String normalizeXuid(String xuid) {
-        if (xuid == null || !xuid.matches("[0-9]{1,20}")) {
-            return null;
-        }
-
-        try {
-            long parsed = Long.parseUnsignedLong(xuid);
-            return parsed == 0 ? null : Long.toUnsignedString(parsed);
-        } catch (NumberFormatException exception) {
-            return null;
         }
     }
 }
