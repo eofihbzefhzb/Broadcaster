@@ -485,13 +485,19 @@ public abstract class SessionManagerCore {
         // Check if the connection is Lost
         if (!rtaIsOpen || !rtcIsOpen || !signalingIsOpen) {
             try {
-                logger.warn("Connection to websocket lost, re-creating session...");
+                // Re-publishing, not re-creating: the session id is drawn once when
+                // ExpandedSessionInfo is built at init() and setSessionId() is never called, so
+                // createSession() below PUTs against the same id. Everyone already in the session
+                // stays a member, which matters because their membership is what keeps the session
+                // visible to their friends. Only restarting the process mints a new id and empties
+                // it. The old wording claimed the opposite and read as a total loss of reach.
+                logger.warn("Connection to websocket lost, re-publishing the Xbox session...");
                 logger.debug("WebSocket status: RTA Open: " + rtaIsOpen + ", RTC Open: " + rtcIsOpen + ", Signaling: " + signalingIsOpen);
 
                 createSession();
-                logger.info("WebSocket session reconnected");
+                logger.info("Websocket reconnected; the Xbox session kept its members");
             } catch (SessionCreationException | SessionUpdateException e) {
-                logger.error("Session is dead and hit exception trying to re-create it", e);
+                logger.error("Session is dead and hit exception trying to re-publish it", e);
             }
         }
     }
