@@ -62,34 +62,7 @@ public class FriendManager {
     public List<FollowerResponse.Person> get() throws XboxFriendsException {
         List<FollowerResponse.Person> people = new ArrayList<>();
 
-        // Create the request for getting the people following us and friends
-        HttpRequest xboxFollowersRequest = HttpRequest.newBuilder()
-            .uri(Constants.FOLLOWERS)
-            .header("Authorization", sessionManager.getTokenHeader())
-            .header("x-xbl-contract-version", "5")
-            .header("accept-language", "en-GB")
-            .GET()
-            .build();
-
-        String lastResponse = "";
-        try {
-            // Get the list of friends from the api
-            lastResponse = httpClient.send(xboxFollowersRequest, HttpResponse.BodyHandlers.ofString()).body();
-
-            // We sometimes get an empty response so don't try and parse it
-            if (lastResponse.isEmpty()) {
-                throw new XboxFriendsException("the followers request returned an empty body");
-            }
-
-            FollowerResponse xboxFollowerResponse = Constants.GSON.fromJson(lastResponse, FollowerResponse.class);
-            if (xboxFollowerResponse.people == null) {
-                throw new XboxFriendsException("the followers request returned no list - " + describe(xboxFollowerResponse));
-            }
-            people.addAll(xboxFollowerResponse.people);
-        } catch (JsonParseException | IOException | InterruptedException e) {
-            logger.debug("Follower request response: " + lastResponse);
-            throw new XboxFriendsException(e.getMessage());
-        }
+        people.addAll(fetchFollowers());
 
         // Create the request for getting the people we are following and friends
         HttpRequest xboxSocialRequest = HttpRequest.newBuilder()
@@ -100,6 +73,7 @@ public class FriendManager {
             .GET()
             .build();
 
+        String lastResponse = "";
         try {
             // Get the list of people we are following from the api
             lastResponse = httpClient.send(xboxSocialRequest, HttpResponse.BodyHandlers.ofString()).body();
@@ -140,6 +114,80 @@ public class FriendManager {
      * Xbox answers with an error object rather than an HTTP error in this case, so the reason is
      * only ever visible here.
      */
+    /**
+     * Followers endpoint variants, tried in turn until one of them answers.
+     * <p>
+     * Xbox fails this request intermittently with "code=1027 Failed to hydrate one or more users".
+     * The diagnostics showed that failure is not a property of the account: one account answered on
+     * detail,preferredColor while failing the other four, another answered on those four while
+     * failing detail,preferredColor, and a third timed out on one variant and answered on the rest.
+     * A single unresolvable follower would have failed every variant equally on every run, so this
+     * is a flaky backend rather than broken data, and rotating through the variants turns a request
+     * that fails often into one that usually gets an answer.
+     */
+    private static final List<String> FOLLOWERS_VARIANTS = List.of(
+        "",
+        "/decoration/detail",
+        "/decoration/follower",
+        "/decoration/detail,preferredColor"
+    );
+
+    /** Whichever variant answered last, tried first so the normal case still costs one request. */
+    private volatile String preferredFollowersVariant = "";
+
+    /**
+     * Fetch the followers list, moving on to the next variant whenever Xbox refuses one.
+     *
+     * @return the followers, from the first variant that returned a list
+     * @throws XboxFriendsException if every variant failed
+     */
+    private List<FollowerResponse.Person> fetchFollowers() throws XboxFriendsException {
+        List<String> variants = new ArrayList<>(FOLLOWERS_VARIANTS);
+        String preferred = this.preferredFollowersVariant;
+        if (variants.remove(preferred)) {
+            variants.add(0, preferred);
+        }
+
+        String lastFailure = "the followers request was never attempted";
+        for (String variant : variants) {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(Constants.FOLLOWERS + variant))
+                .header("Authorization", sessionManager.getTokenHeader())
+                .header("x-xbl-contract-version", "5")
+                .header("accept-language", "en-GB")
+                .GET()
+                .build();
+
+            String body = "";
+            try {
+                body = httpClient.send(request, HttpResponse.BodyHandlers.ofString()).body();
+
+                if (body == null || body.isEmpty()) {
+                    lastFailure = "the followers request returned an empty body";
+                    continue;
+                }
+
+                FollowerResponse response = Constants.GSON.fromJson(body, FollowerResponse.class);
+                if (response == null || response.people == null) {
+                    lastFailure = "the followers request returned no list - "
+                        + (response == null ? "unparseable body" : describe(response));
+                    continue;
+                }
+
+                this.preferredFollowersVariant = variant;
+                return response.people;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new XboxFriendsException("the followers request was interrupted");
+            } catch (JsonParseException | IOException e) {
+                logger.debug("Followers request failed on variant '" + variant + "': " + body);
+                lastFailure = e.getClass().getSimpleName() + ": " + e.getMessage();
+            }
+        }
+
+        throw new XboxFriendsException(lastFailure);
+    }
+
     private static String describe(FollowerResponse response) {
         if (response.code != null || response.description != null) {
             return "Xbox replied code=" + response.code + " description=" + response.description;

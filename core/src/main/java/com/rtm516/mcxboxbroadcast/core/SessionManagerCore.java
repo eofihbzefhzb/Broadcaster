@@ -230,11 +230,12 @@ public abstract class SessionManagerCore {
                     // rather than as the transient hiccup it usually is.
                     friendQueryFailure = exception.getMessage() == null ? "unknown error" : exception.getMessage();
 
-                    // 1027 means one follower's profile cannot be resolved, and Xbox then refuses
-                    // the whole list every single time - retrying only makes startup slower. Any
-                    // other failure (a timeout, a hiccup under the burst of six accounts starting
-                    // at once) usually clears within seconds, so those are worth another go.
-                    if (attempt == FRIENDS_QUERY_ATTEMPTS || friendQueryFailure.contains("code=1027")) {
+                    // Every failure here is worth retrying, 1027 included. That was once treated as
+                    // permanent, on the assumption that it meant one unresolvable follower; the
+                    // followers diagnostics disproved it, showing the same account failing and
+                    // succeeding across attempts. Giving up on it was throwing away lists Xbox
+                    // would have returned on the next try.
+                    if (attempt == FRIENDS_QUERY_ATTEMPTS) {
                         break;
                     }
                     logger.debug("Friends list request failed (attempt " + attempt + "/" + FRIENDS_QUERY_ATTEMPTS
@@ -279,18 +280,12 @@ public abstract class SessionManagerCore {
         }
         logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendSummary + " friends");
         if (friendQueryFailure != null) {
-            // Name the reason. The two causes need opposite responses - a 1027 is permanent until
-            // the broken follower is removed, anything else is worth waiting out - and hiding it
-            // behind debug made it impossible to tell which one an operator is looking at.
-            boolean unresolvableFollower = friendQueryFailure.contains("code=1027");
-            logger.warn("Auto-follow is stalled for this account: " + (unresolvableFollower
-                    ? "one of its followers cannot be resolved by Xbox, which refuses the whole list"
-                    : "Xbox would not return its followers list (" + friendQueryFailure + ")")
-                + (countFromSummary ? ". The count above comes from the summary endpoint." : ""));
-            logger.debug("Followers list unavailable: " + friendQueryFailure
-                + ". Xbox refuses the whole list when a single follower's profile cannot be resolved"
-                + " - a deleted, banned or private account - so retrying does not help. Removing that"
-                + " follower is the only fix.");
+            // Name the reason rather than hiding it behind debug: it is the only way to tell a run
+            // of bad luck from an account that never manages to list its followers at all.
+            logger.warn("Auto-follow is stalled for this run: Xbox would not return the followers"
+                + " list on any endpoint variant (" + friendQueryFailure + ")"
+                + (countFromSummary ? ". The count above comes from the summary endpoint." : "")
+                + " The next periodic sync will try again.");
         }
 
         if (handleFriendship()) {
