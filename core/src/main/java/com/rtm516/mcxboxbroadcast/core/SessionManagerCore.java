@@ -52,8 +52,16 @@ import java.util.function.Consumer;
  * Simple manager to authenticate and create sessions on Xbox
  */
 public abstract class SessionManagerCore {
-    /** How many times the startup friends-list request is tried before giving up on it. */
-    private static final int FRIENDS_QUERY_ATTEMPTS = 4;
+    /**
+     * How many times the startup friends-list request is tried before giving up on it.
+     * <p>
+     * Deliberately small, because each attempt already walks every followers endpoint variant
+     * internally. This loop was sized back when an attempt meant a single request; multiplying the
+     * two pushed a struggling account to around eighty seconds of timeouts, and since accounts start
+     * one after another that stretched a ninety second startup to nearly four minutes. Two passes
+     * still catch the common case of an account that answers a moment later.
+     */
+    private static final int FRIENDS_QUERY_ATTEMPTS = 2;
     /** Gap between those attempts. Xbox usually answers correctly on the second one. */
     private static final long FRIENDS_QUERY_RETRY_DELAY_MS = 2000;
 
