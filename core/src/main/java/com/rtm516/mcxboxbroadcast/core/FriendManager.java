@@ -305,7 +305,12 @@ public class FriendManager {
                         }
                     }
                 } catch (Exception e) {
-                    logger.error("Failed to sync friends", e);
+                    // Debug rather than error: this is the periodic sync, and the followers request
+                    // behind it fails intermittently with Xbox's "code=1027 Failed to hydrate one or
+                    // more users". Nothing is lost when it does - the next run a few minutes later
+                    // picks the list up again - so an error with a stack trace per account per
+                    // failure was pure noise for a condition that heals itself.
+                    logger.debug("Failed to sync friends: " + e.getMessage());
                 }
             }, friendSyncConfig.updateInterval(), friendSyncConfig.updateInterval(), TimeUnit.SECONDS);
         }
