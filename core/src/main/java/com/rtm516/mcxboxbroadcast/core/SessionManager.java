@@ -369,17 +369,35 @@ public class SessionManager extends SessionManagerCore {
      * total, because each of them genuinely holds a door open.
      */
     private boolean isOwnAccount(String xuid) {
-        if (xuid.equals(getXuid())) {
+        if (xuid.equals(xuidOrNull(this))) {
             return true;
         }
         for (SubSessionManager subSessionManager : subSessionManagers.values()) {
-            // getXuid() is null until that account authenticates. It cannot be an MPSD member before
-            // then, so a null here simply means "not this one" rather than an unknown account.
-            if (xuid.equals(subSessionManager.getXuid())) {
+            // A null here simply means "not this one": an account that has not authenticated cannot
+            // be an MPSD member yet.
+            if (xuid.equals(xuidOrNull(subSessionManager))) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * The account's xuid, or null when its authentication is not available.
+     * <p>
+     * getXuid() reads a cached profile and dereferences it without checking, so it throws rather
+     * than returning null once that cache has been cleared. A restart leaves the previous RTA
+     * websocket alive for a moment after shutdown has emptied it, and a member update arriving in
+     * exactly that window took the websocket thread down with a NullPointerException. Nothing is
+     * lost by treating it as unknown: an account whose authentication is gone is not a member of
+     * the session we are comparing against.
+     */
+    private static String xuidOrNull(SessionManagerCore manager) {
+        try {
+            return manager.getXuid();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
