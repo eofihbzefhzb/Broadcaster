@@ -117,6 +117,7 @@ public class SessionManager extends SessionManagerCore {
     public boolean init(SessionInfo sessionInfo, CoreConfig.FriendSyncConfig friendSyncConfig) throws SessionCreationException, SessionUpdateException {
         // Set the internal session information based on the session info
         this.sessionInfo = new ExpandedSessionInfo("", "", sessionInfo);
+        reuseStoredSessionId();
 
         super.init();
 
@@ -486,6 +487,35 @@ public class SessionManager extends SessionManagerCore {
         }
 
         coreLogger.info("Removed sub-session with ID " + id);
+    }
+
+    /**
+     * Publish into the same Xbox session document as the previous run, when one is known.
+     * <p>
+     * The id is otherwise drawn fresh on every start, which hands Xbox a brand new and empty
+     * session. Players already in game keep playing - Geyser owns their connection, not this
+     * process - but they are not members of the new session, and it is membership that keeps the
+     * server visible to their friends. Restarting therefore silently threw away every player who
+     * was advertising the server, and they only came back by disconnecting and rejoining.
+     * <p>
+     * Only the primary session needs this: the sub-sessions join its session rather than holding
+     * one of their own, so its document is where every member lives.
+     * <p>
+     * Safe when it does not work out. If Xbox has already discarded the old session, the update
+     * simply recreates it and the run behaves exactly as a fresh id would have.
+     */
+    private void reuseStoredSessionId() {
+        try {
+            String stored = storageManager().sessionId();
+            if (stored != null && !stored.isBlank()) {
+                this.sessionInfo.setSessionId(stored.trim());
+                logger.debug("Reusing the previous Xbox session id " + stored.trim());
+            } else {
+                storageManager().sessionId(this.sessionInfo.getSessionId());
+            }
+        } catch (IOException e) {
+            logger.debug("Could not reuse the stored Xbox session id: " + e.getMessage());
+        }
     }
 
     /**

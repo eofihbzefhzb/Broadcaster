@@ -62,6 +62,16 @@ public class FileStorageManager implements StorageManager {
     }
 
     @Override
+    public String sessionId() throws IOException {
+        return read("session_id.txt");
+    }
+
+    @Override
+    public void sessionId(String data) throws IOException {
+        write("session_id.txt", data);
+    }
+
+    @Override
     public String subSessions() throws IOException {
         return read("sub_sessions.json");
     }

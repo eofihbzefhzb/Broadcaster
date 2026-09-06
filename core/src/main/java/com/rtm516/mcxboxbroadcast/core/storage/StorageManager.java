@@ -9,6 +9,16 @@ public interface StorageManager {
     String cache() throws IOException;
     void cache(String data) throws IOException;
 
+    /**
+     * The Xbox session id used last time, so a restart can publish into the same session document
+     * rather than a fresh one. Members are held by Xbox against that document, and players already
+     * in game do not re-add themselves to a new session, so minting a new id on every start threw
+     * away every member that was making the server visible to their friends.
+     */
+    String sessionId() throws IOException;
+
+    void sessionId(String data) throws IOException;
+
     String subSessions() throws IOException;
     void subSessions(String data) throws IOException;
 
