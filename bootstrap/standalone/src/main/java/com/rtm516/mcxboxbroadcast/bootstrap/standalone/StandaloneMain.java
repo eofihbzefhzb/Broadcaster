@@ -347,6 +347,7 @@ public class StandaloneMain {
         sessionInfo.setJoinRestriction(orDefault(config.xboxSession().joinRestriction(), "followed"));
         sessionInfo.setWorldType(config.xboxSession().worldType());
         sessionInfo.setBroadcastSetting(config.xboxSession().broadcastSetting());
+        sessionInfo.setLanGame(config.xboxSession().lanGame());
         sessionInfo.setEditorWorld(config.xboxSession().editorWorld());
         sessionInfo.setHardcore(config.xboxSession().hardcore());
         sessionInfo.setExternalNetherNetHosted(isExternalNetherNetEnabled());

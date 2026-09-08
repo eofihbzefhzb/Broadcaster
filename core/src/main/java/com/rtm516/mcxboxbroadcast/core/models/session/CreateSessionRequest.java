@@ -23,7 +23,7 @@ public class CreateSessionRequest extends JoinSessionRequest {
             sessionInfo.getBroadcastSetting(),
             false,
             sessionInfo.getJoinability(),
-            false,
+            sessionInfo.isLanGame(),
             sessionInfo.getMaxPlayers(),
             sessionInfo.getPlayers(),
             true,

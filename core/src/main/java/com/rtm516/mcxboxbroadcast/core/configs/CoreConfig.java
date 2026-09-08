@@ -190,6 +190,17 @@ public interface CoreConfig {
         @NumericRange(from = 0, to = 4)
         int broadcastSetting();
 
+        @Comment("""
+            Whether the session announces itself as a LAN game, sent as LanGame.
+            This is the one visibility field the upstream NetherNet rewrite changed: builds up to
+            49 published true, build 50 switched it to false when it moved the session from RakNet
+            to WebRTC. It is what makes Minecraft list the session among joinable worlds rather
+            than only reachable through a direct invite, so false costs reach without gaining
+            anything here - the transport is chosen by TransportLayer, not by this flag.
+            Leave it true unless you are deliberately testing the build 50 behaviour.""")
+        @DefaultBoolean(true)
+        boolean lanGame();
+
         @Comment("The world type shown in the Xbox session")
         @DefaultString("Survival")
         String worldType();

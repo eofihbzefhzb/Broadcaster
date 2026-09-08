@@ -21,6 +21,9 @@ public class SessionInfo {
     private String worldType = "Survival";
     /** @see CoreConfig.XboxSessionConfig#broadcastSetting() */
     private int broadcastSetting = 3;
+
+    /** @see CoreConfig.XboxSessionConfig#lanGame() */
+    private boolean lanGame = true;
     private boolean editorWorld;
     private boolean hardcore;
     private boolean proxyBridgeEnabled;
@@ -206,6 +209,14 @@ public class SessionInfo {
         return broadcastSetting;
     }
 
+    public boolean isLanGame() {
+        return lanGame;
+    }
+
+    public void setLanGame(boolean lanGame) {
+        this.lanGame = lanGame;
+    }
+
     public void setBroadcastSetting(int broadcastSetting) {
         this.broadcastSetting = broadcastSetting;
     }
@@ -217,6 +228,7 @@ public class SessionInfo {
         copy.setJoinRestriction(joinRestriction);
         copy.setWorldType(worldType);
         copy.setBroadcastSetting(broadcastSetting);
+        copy.setLanGame(lanGame);
         copy.setEditorWorld(editorWorld);
         copy.setHardcore(hardcore);
         copy.setProxyBridgeEnabled(proxyBridgeEnabled);
