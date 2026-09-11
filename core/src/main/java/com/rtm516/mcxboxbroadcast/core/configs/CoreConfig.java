@@ -156,8 +156,18 @@ public interface CoreConfig {
             after the resource-pack step, leaving the player on "searching for a game session".
             In particular "joinable_by_friends_of_friends" does not exist; it was tested twice, on
             both the shared-session and one-session-per-account layouts, and failed identically.
-            Friends-of-friends visibility is not set here anyway - see broadcast-setting below,
-            which already defaults to it.
+
+            The three-way "Player access" control in the Minecraft UI is misleading here, because
+            the setting it moves is broadcast-setting, not this field. The three buttons write
+            these triples, and note that the two rightmost share one joinability string:
+
+              Invite only         invite_only          joinRestriction=local      broadcast=1
+              Friends             joinable_by_friends  joinRestriction=followed   broadcast=2
+              Friends of friends  joinable_by_friends  joinRestriction=followed   broadcast=3
+
+            So friends-of-friends is broadcast-setting 3 with this field left on
+            "joinable_by_friends". Setting it here instead is what produced the outage above.
+            Treat the three fields as one triple rather than as independent switches.
             This does NOT control who can see the session - see read-restriction below for that.""")
         @DefaultString("joinable_by_friends")
         String joinability();
