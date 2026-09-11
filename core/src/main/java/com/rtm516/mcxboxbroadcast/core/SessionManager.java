@@ -556,13 +556,17 @@ public class SessionManager extends SessionManagerCore {
         String previous = this.sessionInfo.getSessionId();
         try {
             this.sessionInfo.setSessionId(UUID.randomUUID().toString());
-            createSession();
 
-            // The new session starts empty; without this the next update would report all 28 of the
-            // old members as having left.
+            // Before createSession(), not after: it ends by calling updateSession(), which diffs
+            // the member list. Left alone, that diff would compare the new session's empty list
+            // against the 28 members of the old one and announce every one of them as having left.
+            // Null is the "no baseline yet" state, so the diff adopts whichever list it finds in
+            // silence - correct both for the new session and for the old one if this throws.
             synchronized (this) {
-                this.knownMembers = new HashMap<>();
+                this.knownMembers = null;
             }
+
+            createSession();
 
             try {
                 storageManager().sessionId(this.sessionInfo.getSessionId());
