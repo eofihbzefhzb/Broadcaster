@@ -293,7 +293,7 @@ public class SessionManager extends SessionManagerCore {
 
             logMemberChanges(sessionResponse);
 
-            // Restart if we have 28/30 session members
+            // Rotate onto a fresh session once we reach 28 of the 30 member cap
             int players = sessionResponse.members().size();
             if (players >= 28 && claimRestartSlot()) {
                 logger.info("Rotating session due to " + players + "/30 players");
@@ -635,7 +635,7 @@ public class SessionManager extends SessionManagerCore {
      * Restart the session manager
      */
     /**
-     * Lets one full-session restart through and turns away anything that arrives during the
+     * Lets one session rotation through and turns away anything that arrives during the
      * cooldown, returning true only to the caller that wins the slot.
      * <p>
      * The member cap check that calls this sits in updateSession(), which runs from the scheduled
