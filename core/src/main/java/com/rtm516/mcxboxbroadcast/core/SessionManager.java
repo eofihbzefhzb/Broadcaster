@@ -296,6 +296,9 @@ public class SessionManager extends SessionManagerCore {
             int players = sessionResponse.members().size();
             if (players >= 28 && claimRestartSlot()) {
                 logger.info("Restarting session due to " + players + "/30 players");
+                // The whole point of this restart is to get an empty session, so the stored id has
+                // to go first - see forgetStoredSessionId().
+                forgetStoredSessionId();
                 restart();
             }
         } catch (JsonParseException e) {
@@ -529,6 +532,24 @@ public class SessionManager extends SessionManagerCore {
      * Safe when it does not work out. If Xbox has already discarded the old session, the update
      * simply recreates it and the run behaves exactly as a fresh id would have.
      */
+    /**
+     * Drops the stored session id so the next init() publishes a brand new, empty session.
+     * <p>
+     * Reusing the id is what lets members survive a process restart, which is what we want when the
+     * jar is updated. It is the opposite of what we want when the session is restarted because it
+     * hit the 30-member cap: there the entire purpose is to clear the member list, and coming back
+     * up on the same id brings all 28 members back with it. The cap check then fires again on the
+     * very next update, restarts again, and never converges - which is how a full session turned
+     * into 58 restarts in one minute, a torn-down thread pool, and an Xbox 429.
+     */
+    private void forgetStoredSessionId() {
+        try {
+            storageManager().sessionId("");
+        } catch (IOException e) {
+            logger.debug("Could not clear the stored Xbox session id: " + e.getMessage());
+        }
+    }
+
     private void reuseStoredSessionId() {
         try {
             String stored = storageManager().sessionId();
