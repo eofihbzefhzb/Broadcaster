@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -35,10 +36,10 @@ public class SessionManager extends SessionManagerCore {
     private final ScheduledExecutorService scheduledThreadPool;
     private final Map<String, SubSessionManager> subSessionManagers;
 
-    /** Long enough for a restart to finish and the new session's member list to settle. */
+    /** Long enough for a rotation to finish and the new session's member list to settle. */
     private static final long RESTART_COOLDOWN_MS = 60_000L;
 
-    /** When the last restart was claimed; see claimRestartSlot(). */
+    /** When the last session rotation was claimed; see claimRestartSlot(). */
     private final AtomicLong lastRestartAttempt = new AtomicLong(0L);
 
     private CoreConfig.FriendSyncConfig friendSyncConfig;
@@ -295,11 +296,8 @@ public class SessionManager extends SessionManagerCore {
             // Restart if we have 28/30 session members
             int players = sessionResponse.members().size();
             if (players >= 28 && claimRestartSlot()) {
-                logger.info("Restarting session due to " + players + "/30 players");
-                // The whole point of this restart is to get an empty session, so the stored id has
-                // to go first - see forgetStoredSessionId().
-                forgetStoredSessionId();
-                restart();
+                logger.info("Rotating session due to " + players + "/30 players");
+                rotateSession();
             }
         } catch (JsonParseException e) {
             throw new SessionUpdateException("Failed to parse session response: " + e.getMessage());
@@ -533,20 +531,49 @@ public class SessionManager extends SessionManagerCore {
      * simply recreates it and the run behaves exactly as a fresh id would have.
      */
     /**
-     * Drops the stored session id so the next init() publishes a brand new, empty session.
+     * Publishes a brand new, empty Xbox session under a fresh id, in place.
      * <p>
-     * Reusing the id is what lets members survive a process restart, which is what we want when the
-     * jar is updated. It is the opposite of what we want when the session is restarted because it
-     * hit the 30-member cap: there the entire purpose is to clear the member list, and coming back
-     * up on the same id brings all 28 members back with it. The cap check then fires again on the
-     * very next update, restarts again, and never converges - which is how a full session turned
-     * into 58 restarts in one minute, a torn-down thread pool, and an Xbox 429.
+     * This replaces the full restart() the member cap used to trigger. A restart tears down this
+     * manager, every sub-session and the shared thread pool, then builds all of them again - close
+     * to thirty seconds during which not one of the six accounts advertises the server, so nobody
+     * can find it. Since only the primary session ever accumulates members, throwing away the five
+     * sub-sessions to clear the primary's member list bought nothing and closed every door at once.
+     * <p>
+     * createSession() is the same call the device-token refresh already makes to republish in
+     * place, so this path is well travelled. It swaps the RTA websocket (setupRtaWebsocket closes
+     * the previous one) and publishes the new session while the sub-sessions keep running
+     * untouched, which is what keeps the server discoverable throughout.
+     * <p>
+     * The id has to change: reusing it is what lets members survive a process restart, but here it
+     * would bring all 28 members straight back, leaving the cap check true and the rotation
+     * looping. That loop is what produced 58 restarts inside a minute, a thread pool torn down
+     * under its own users, and an Xbox 429 that kept the session dark for over an hour.
+     * <p>
+     * On failure the previous id is put back, so the session that is still live stays the one this
+     * manager talks about, and the cooldown lets the next update try again.
      */
-    private void forgetStoredSessionId() {
+    private void rotateSession() {
+        String previous = this.sessionInfo.getSessionId();
         try {
-            storageManager().sessionId("");
-        } catch (IOException e) {
-            logger.debug("Could not clear the stored Xbox session id: " + e.getMessage());
+            this.sessionInfo.setSessionId(UUID.randomUUID().toString());
+            createSession();
+
+            // The new session starts empty; without this the next update would report all 28 of the
+            // old members as having left.
+            synchronized (this) {
+                this.knownMembers = new HashMap<>();
+            }
+
+            try {
+                storageManager().sessionId(this.sessionInfo.getSessionId());
+            } catch (IOException e) {
+                logger.debug("Could not store the rotated Xbox session id: " + e.getMessage());
+            }
+
+            logger.info("Published a new Xbox session; sub-sessions stayed up throughout");
+        } catch (Exception e) {
+            this.sessionInfo.setSessionId(previous);
+            logger.error("Failed to rotate the full session, keeping the current one", e);
         }
     }
 

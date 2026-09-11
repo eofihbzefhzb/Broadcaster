@@ -250,7 +250,7 @@ public abstract class SessionManagerCore {
      * @throws SessionCreationException If the initial creation of the session fails
      * @throws SessionUpdateException If the updating of the session information fails
      */
-    private void createSession() throws SessionCreationException, SessionUpdateException {
+    protected void createSession() throws SessionCreationException, SessionUpdateException {
         // Get the token for authentication
         BedrockAuthManager manager = getAuthManager();
         String token;
