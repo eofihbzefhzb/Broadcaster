@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CompletableFuture;
@@ -331,6 +332,42 @@ public class StandaloneMain {
         return root.get(key).getAsInt();
     }
 
+    /**
+     * The two values the Minecraft client is able to parse, per the Xbox session model: a game
+     * session is gated by the MPSD restrictions, and the party-level joinability it mirrors has
+     * exactly these two states.
+     */
+    private static final Set<String> KNOWN_JOINABILITY = Set.of("joinable_by_friends", "invite_only");
+
+    /**
+     * Joinability is a custom session property, so Xbox stores whatever it is given and only the
+     * client ever interprets it. That makes an unrecognised value the worst kind of failure: the
+     * session publishes normally, the player authenticates all the way through, and then the client
+     * simply stops - no error, no disconnect, nothing in any log on our side.
+     * <p>
+     * That happened here with "joinable_by_friends_of_friends", a value that does not exist, and it
+     * silently broke joins for real players until it was tracked down by packet tracing. Falling
+     * back with a warning costs nothing and makes the next typo a startup line instead of an
+     * invisible outage.
+     * <p>
+     * Note that friends-of-friends reach is not configured here at all: it comes from
+     * join-restriction "followed", which admits anyone followed by a session member, and joining
+     * players become members.
+     */
+    private static String validJoinability(String value) {
+        if (value == null || value.isBlank()) {
+            return "joinable_by_friends";
+        }
+        String trimmed = value.trim();
+        if (KNOWN_JOINABILITY.contains(trimmed)) {
+            return trimmed;
+        }
+        logger.warn("Ignoring unknown joinability \"" + trimmed + "\" and using \"joinable_by_friends\" instead; "
+            + "valid values are " + KNOWN_JOINABILITY + ". An unknown value leaves clients stuck on the "
+            + "loading screen after they have already authenticated.");
+        return "joinable_by_friends";
+    }
+
     private static String orDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
     }
@@ -339,10 +376,7 @@ public class StandaloneMain {
         // Read from config like every other setting below. This was previously pinned to
         // "joinable_by_friends" by a REQUIRED_JOINABILITY constant, which silently overrode
         // whatever the config asked for.
-        String joinability = config.xboxSession().joinability();
-        sessionInfo.setJoinability(joinability == null || joinability.isBlank()
-            ? "joinable_by_friends"
-            : joinability);
+        sessionInfo.setJoinability(validJoinability(config.xboxSession().joinability()));
         sessionInfo.setReadRestriction(orDefault(config.xboxSession().readRestriction(), "followed"));
         sessionInfo.setJoinRestriction(orDefault(config.xboxSession().joinRestriction(), "followed"));
         sessionInfo.setWorldType(config.xboxSession().worldType());
