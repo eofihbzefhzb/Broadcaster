@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Simple manager to authenticate and create sessions on Xbox
@@ -33,6 +34,12 @@ import java.util.concurrent.ThreadLocalRandom;
 public class SessionManager extends SessionManagerCore {
     private final ScheduledExecutorService scheduledThreadPool;
     private final Map<String, SubSessionManager> subSessionManagers;
+
+    /** Long enough for a restart to finish and the new session's member list to settle. */
+    private static final long RESTART_COOLDOWN_MS = 60_000L;
+
+    /** When the last restart was claimed; see claimRestartSlot(). */
+    private final AtomicLong lastRestartAttempt = new AtomicLong(0L);
 
     private CoreConfig.FriendSyncConfig friendSyncConfig;
     private Runnable restartCallback;
@@ -287,7 +294,7 @@ public class SessionManager extends SessionManagerCore {
 
             // Restart if we have 28/30 session members
             int players = sessionResponse.members().size();
-            if (players >= 28) {
+            if (players >= 28 && claimRestartSlot()) {
                 logger.info("Restarting session due to " + players + "/30 players");
                 restart();
             }
@@ -575,6 +582,29 @@ public class SessionManager extends SessionManagerCore {
     /**
      * Restart the session manager
      */
+    /**
+     * Lets one full-session restart through and turns away anything that arrives during the
+     * cooldown, returning true only to the caller that wins the slot.
+     * <p>
+     * The member cap check that calls this sits in updateSession(), which runs from the scheduled
+     * update, the RTA websocket thread and the nonce refresh. A restart does not empty the member
+     * list instantly, so without this every one of those paths sees the session still over the cap
+     * and asks for another restart. On a busy session that produced a storm: several
+     * SessionManagers starting at once, one tearing down the scheduled thread pool while another
+     * was still submitting to it, and the resulting RejectedExecutionException and "RTA Websocket
+     * [null] disconnected before connectionId was received" left the session dead until the process
+     * was restarted by hand. Members joining stopped being tracked or published from then on.
+     * <p>
+     * A timestamp rather than a one-shot flag because a restart can fail, and a session stuck at
+     * the cap with no way to retry would be just as broken. Compare-and-set rather than a plain
+     * read and write because the callers are concurrent threads.
+     */
+    private boolean claimRestartSlot() {
+        long now = System.currentTimeMillis();
+        long last = lastRestartAttempt.get();
+        return now - last >= RESTART_COOLDOWN_MS && lastRestartAttempt.compareAndSet(last, now);
+    }
+
     public void restart() {
         if (restartCallback != null) {
             restartCallback.run();
