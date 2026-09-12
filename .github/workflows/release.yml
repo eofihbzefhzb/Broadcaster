@@ -98,7 +98,9 @@ jobs:
       uses: ncipollo/release-action@v1
       if: ${{ success() && github.ref_name == 'master' }}
       with:
-        artifacts: "bootstrap/standalone/build/libs/MCXboxBroadcastStandalone.jar,egg-m-c-xbox-broadcast.json"
+        # Upstream's Pterodactyl egg is not attached here: its install script downloads upstream's
+        # jar, so publishing it with this fork's release would install the wrong Broadcaster.
+        artifacts: "bootstrap/standalone/build/libs/MCXboxBroadcastStandalone.jar"
         allowUpdates: true
         bodyFile: "release_notes.md"
         draft: false
