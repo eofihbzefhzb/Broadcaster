@@ -33,7 +33,7 @@ import java.util.concurrent.CompletableFuture;
 
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
-    
+
     private static CoreConfig config;
     private static StandaloneLoggerImpl logger;
     private static SessionInfo sessionInfo;
@@ -104,6 +104,7 @@ public class StandaloneMain {
 
         logger.setDebug(config.debugMode());
 
+        // TODO Support multiple notification types
         notificationManager = new SlackNotificationManager(logger, config.notifications());
         if (config.enabled()) {
             sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
@@ -114,7 +115,7 @@ public class StandaloneMain {
         }
 
         discoveredExternalNetworkId = discoverExternalNetworkId();
-        
+
         sessionInfo = new SessionInfo(config.session().sessionInfo());
         applySessionSettings(sessionInfo);
 
@@ -129,7 +130,7 @@ public class StandaloneMain {
 
                 if (discoveredExternalNetworkId.isBlank()) {
                     logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
-                    logger.error("Restart Paper/Geyser once so the updated Geyser fork can start NetherNet ingress and write portal-session-status.json, then start MCXboxBroadcast again.");
+                    logger.error("Restart Velocity/Geyser once so the updated Geyser fork can start NetherNet ingress and write portal-session-status.json, then start MCXboxBroadcast again.");
                     if (sessionManager != null) {
                         sessionManager.shutdown();
                         sessionManager = null;
@@ -172,12 +173,14 @@ public class StandaloneMain {
         }
 
         if (config.enabled()) {
+            // Fallback to the gamertag if the host name is empty
             if (sessionInfo.getHostName().isEmpty()) {
                 sessionInfo.setHostName(sessionManager.getGamertag());
             }
 
             PingUtil.setWebPingEnabled(config.session().webQueryFallback());
 
+            // Sync the session info from the server if needed
             updateSessionInfo(sessionInfo);
 
             try {
@@ -199,6 +202,7 @@ public class StandaloneMain {
         try {
             sessionManager.shutdown();
 
+            // Create a new session manager, but reuse the notification manager as config hasn't been reloaded
             sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
             sessionManager.setNetherNetPortRange(config.session().icePortRange().min(), config.session().icePortRange().max());
 
@@ -212,6 +216,8 @@ public class StandaloneMain {
         sessionManager.restartCallback(StandaloneMain::restart);
         boolean initialized = sessionManager.init(sessionInfo, config.friendSync());
 
+        // If the session failed to initialize, don't start the update loop
+        // We assume an error has already been logged
         if (!initialized) {
             return;
         }
@@ -222,6 +228,7 @@ public class StandaloneMain {
             }
 
             try {
+                // Update the session
                 sessionManager.updateSession(sessionInfo);
                 if (config.suppressSessionUpdateMessage()) {
                     sessionManager.logger().debug("Updated session!");
@@ -254,12 +261,14 @@ public class StandaloneMain {
                     : new InetSocketAddress(sessionInfo.getIp(), sessionInfo.getPort());
                 BedrockPong pong = PingUtil.ping(addressToPing, 1500, TimeUnit.MILLISECONDS).get();
 
+                // Update the session information
                 sessionInfo.setHostName(pong.subMotd());
                 sessionInfo.setWorldName(pong.motd());
                 sessionInfo.setPlayers(pong.playerCount());
                 sessionInfo.setMaxPlayers(pong.maximumPlayerCount());
                 applySessionSettings(sessionInfo);
 
+                // Fallback to the gamertag if the host name is empty
                 if (sessionInfo.getHostName().isEmpty()) {
                     sessionInfo.setHostName(sessionManager.getGamertag());
                 }
@@ -273,6 +282,7 @@ public class StandaloneMain {
                     sessionInfo.setMaxPlayers(config.session().sessionInfo().maxPlayers());
                     applySessionSettings(sessionInfo);
 
+                    // Fallback to the gamertag if the host name is empty
                     if (sessionInfo.getHostName().isEmpty()) {
                         sessionInfo.setHostName(sessionManager.getGamertag());
                     }
@@ -303,6 +313,7 @@ public class StandaloneMain {
                 sessionInfo.setMaxPlayers(readStatusInt(root, "maxPlayers", config.session().sessionInfo().maxPlayers()));
                 applySessionSettings(sessionInfo);
 
+                // Fallback to the gamertag if the host name is empty
                 if (sessionInfo.getHostName().isEmpty()) {
                     sessionInfo.setHostName(sessionManager.getGamertag());
                 }
@@ -361,13 +372,9 @@ public class StandaloneMain {
             sessionInfo.setRelayTargetPort(0);
         }
 
-        if (sessionInfo.getHostName().isEmpty()) {
-            sessionInfo.setHostName("MCXboxBroadcast");
-        }
-        if (sessionInfo.getWorldName().isEmpty()) {
-            sessionInfo.setWorldName(sessionInfo.getHostName());
-        }
-
+        // No default for an empty host or world name here. Every caller that publishes falls back to
+        // the account's gamertag right after this, and ExpandedSessionInfo supplies "MCXboxBroadcast"
+        // as the last resort; defaulting here first made each of those gamertag fallbacks unreachable.
         applySubseasonSuffix(sessionInfo);
     }
 
@@ -520,7 +527,7 @@ public class StandaloneMain {
                 if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
                     String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
                     if (!networkId.isBlank()) {
-                        // ANTI-SPAM LOG : Log en INFO uniquement si l'ID primaire change, sinon debug discret
+                        // Info only when the id changes; this runs on every discovery and update pass
                         if (!networkId.equals(lastLoggedPrimaryNetworkId)) {
                             logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
                             lastLoggedPrimaryNetworkId = networkId;

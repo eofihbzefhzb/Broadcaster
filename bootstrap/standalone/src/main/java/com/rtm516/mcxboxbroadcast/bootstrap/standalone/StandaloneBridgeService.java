@@ -92,15 +92,19 @@ public final class StandaloneBridgeService {
 
     private BedrockPong createAdvertisement(int port) {
         SessionInfo sessionInfo = this.sessionInfoSupplier.get();
+        // Built when the bridge starts, which can be before a gamertag is known or with publishing
+        // turned off entirely, so the names may still be empty; an empty MOTD shows as a blank server.
+        String hostName = sessionInfo.getHostName().isEmpty() ? "MCXboxBroadcast" : sessionInfo.getHostName();
+        String worldName = sessionInfo.getWorldName().isEmpty() ? hostName : sessionInfo.getWorldName();
         return new BedrockPong()
             .edition("MCPE")
             .gameType(sessionInfo.getWorldType())
             .version(getCodec().getMinecraftVersion())
             .protocolVersion(getCodec().getProtocolVersion())
-            .motd(sessionInfo.getWorldName())
+            .motd(worldName)
             .playerCount(sessionInfo.getPlayers())
             .maximumPlayerCount(sessionInfo.getMaxPlayers())
-            .subMotd(sessionInfo.getHostName())
+            .subMotd(hostName)
             .nintendoLimited(false)
             .ipv4Port(port)
             .ipv6Port(port);
