@@ -222,9 +222,7 @@ public class SessionManager extends SessionManagerCore {
         List<String> finalSubSessions = subSessions;
         scheduledThreadPool.execute(() -> {
             // Create the sub-session manager for each sub-session
-            for (int i = 0; i < finalSubSessions.size(); i++) {
-                String subSession = finalSubSessions.get(i);
-
+            for (String subSession : finalSubSessions) {
                 SubSessionManager subSessionManager = new SubSessionManager(subSession, this, storageManager().subSession(subSession), notificationManager(), logger);
                 // Register before init(), not after. init() is what joins the MPSD session, so the
                 // primary's periodic update can see this account arrive as a member while the map
@@ -235,9 +233,12 @@ public class SessionManager extends SessionManagerCore {
                 try {
                     subSessionManager.init();
                     subSessionManager.friendManager().init(this.friendSyncConfig);
-                } catch (SessionCreationException | SessionUpdateException e) {
+                } catch (SessionCreationException | SessionUpdateException | RuntimeException e) {
+                    // RuntimeException too: registering first means any failure has to take the
+                    // manager back out, or a half-initialised account stays listed as one of ours.
                     subSessionManagers.remove(subSession);
                     logger.error("Failed to create sub-session " + subSession, e);
+                    // TODO Retry creation after 30s or so
                 }
             }
         });
@@ -527,7 +528,7 @@ public class SessionManager extends SessionManagerCore {
         try {
             subSessionManager.init();
             subSessionManager.friendManager().init(friendSyncConfig);
-        } catch (SessionCreationException | SessionUpdateException e) {
+        } catch (SessionCreationException | SessionUpdateException | RuntimeException e) {
             subSessionManagers.remove(id);
             coreLogger.error("Failed to create sub-session", e);
             return;
