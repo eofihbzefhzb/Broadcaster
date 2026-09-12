@@ -108,7 +108,7 @@ public class SessionManager extends SessionManagerCore {
                 }
             }
         } catch (IOException e) {
-            // Pas de sous-sessions configurées
+            // No sub-sessions are configured
         } catch (Exception e) {
             logger.error("Failed to pre-authenticate sub-sessions", e);
         }

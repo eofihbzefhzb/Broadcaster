@@ -118,7 +118,6 @@ public class StandaloneMain {
         sessionInfo = new SessionInfo(config.session().sessionInfo());
         applySessionSettings(sessionInfo);
 
-        // -- FIX START --
         // Run the blocking wait logic asynchronously so the main thread can finish
         // and the auth cache can be persisted successfully.
         if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
@@ -144,7 +143,6 @@ public class StandaloneMain {
         } else {
             continueInitialization();
         }
-        // -- FIX END --
 
         logger.start();
     }
