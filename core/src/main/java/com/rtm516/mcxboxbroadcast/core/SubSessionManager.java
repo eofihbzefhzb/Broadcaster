@@ -147,7 +147,7 @@ public class SubSessionManager extends SessionManagerCore {
      * Failures are logged rather than thrown: one sub-account being unable to refresh must not stop
      * the others or the primary session update.
      */
-    public void refresh() {
+    public synchronized void refresh() {
         if (!initialized) {
             return;
         }
@@ -156,6 +156,36 @@ public class SubSessionManager extends SessionManagerCore {
             updateSession();
         } catch (SessionUpdateException e) {
             logger.error("Failed to refresh session membership", e);
+        }
+    }
+
+    /**
+     * Re-points this account at the primary's current session after the primary has moved to a new
+     * session id.
+     * <p>
+     * refresh() is not enough for that. It moves the membership, since updateSession() reads
+     * parent.getSessionId() each time, but the activity handle - the thing that puts the server in
+     * this account's followers' friends lists - is only created inside createSession(), with the id
+     * current at that moment. Without this the handle keeps naming the session the primary just left
+     * because it was full, and this account's followers can see the server but not get into it.
+     * <p>
+     * createSession() is the same call init() made for this account and the one checkConnection()
+     * makes after a dropped websocket, so it is not a new path: it rejoins the current session and
+     * creates the handle against it.
+     * <p>
+     * Synchronized together with refresh(). A periodic refresh landing while this runs would find
+     * the websocket in the middle of being replaced, take that for a dropped connection, and rebuild
+     * it concurrently - two threads each closing the other's socket.
+     */
+    public synchronized void republish() {
+        if (!initialized) {
+            return;
+        }
+
+        try {
+            createSession();
+        } catch (SessionCreationException | SessionUpdateException e) {
+            logger.error("Failed to point this account at the new session; its followers still see the previous one", e);
         }
     }
 

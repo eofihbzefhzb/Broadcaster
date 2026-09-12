@@ -541,8 +541,15 @@ public class SessionManager extends SessionManagerCore {
      * <p>
      * createSession() is the same call the device-token refresh already makes to republish in
      * place, so this path is well travelled. It swaps the RTA websocket (setupRtaWebsocket closes
-     * the previous one) and publishes the new session while the sub-sessions keep running
-     * untouched, which is what keeps the server discoverable throughout.
+     * the previous one) and publishes the new session.
+     * <p>
+     * The sub-accounts then have to be pointed at it. Each one advertises the server through an
+     * activity handle, and that handle names a session id: it is created once, in createSession(),
+     * with whatever id the primary held at that moment. Their membership follows the primary on its
+     * own, because SubSessionManager#updateSession reads parent.getSessionId() on every refresh, but
+     * the handle does not - left alone, five of the six doors would keep leading to the old session,
+     * which is the full one, until each account's websocket happened to drop. See
+     * SubSessionManager#republish().
      * <p>
      * The id has to change: reusing it is what lets members survive a process restart, but here it
      * would bring all 28 members straight back, leaving the cap check true and the rotation
@@ -574,7 +581,14 @@ public class SessionManager extends SessionManagerCore {
                 logger.debug("Could not store the rotated Xbox session id: " + e.getMessage());
             }
 
-            logger.info("Published a new Xbox session; sub-sessions stayed up throughout");
+            logger.info("Published a new Xbox session; pointing " + subSessionManagers.size() + " sub-account(s) at it");
+
+            // On the pool, one task per account, as refreshSubSessions() does: each republish waits
+            // on its own RTA connection id, and this method can be running on the primary's
+            // websocket thread, which must not sit through several of those in series.
+            for (SubSessionManager subSessionManager : subSessionManagers.values()) {
+                scheduledThreadPool.execute(subSessionManager::republish);
+            }
         } catch (Exception e) {
             this.sessionInfo.setSessionId(previous);
             logger.error("Failed to rotate the full session, keeping the current one", e);
