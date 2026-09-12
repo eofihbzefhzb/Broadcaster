@@ -27,6 +27,12 @@ public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
 
     /**
+     * The primary session id this account's activity handle was last created against, or null before
+     * the first. refresh() compares it with the primary's current id; see there.
+     */
+    private volatile String handleSessionId;
+
+    /**
      * Create a new session manager for a sub-session
      *
      * @param id The id of the sub-session
@@ -76,6 +82,21 @@ public class SubSessionManager extends SessionManagerCore {
     public void init() throws SessionCreationException, SessionUpdateException {
         this.sessionInfo = new ExpandedSessionInfo("", "", buildShardSessionInfo());
         super.init();
+    }
+
+    /**
+     * Records which primary session the activity handle names, for refresh() to check.
+     * <p>
+     * Every path that builds the handle comes through here - init(), republish(), and
+     * checkConnection() after a dropped websocket. The id is read before the call rather than after:
+     * if the primary rotates while this runs, the handle may already name the old id, and recording
+     * the old id makes the next refresh() republish instead of trusting a handle that could be stale.
+     */
+    @Override
+    protected void createSession() throws SessionCreationException, SessionUpdateException {
+        String sessionId = getSessionId();
+        super.createSession();
+        handleSessionId = sessionId;
     }
 
     /**
@@ -152,6 +173,16 @@ public class SubSessionManager extends SessionManagerCore {
             return;
         }
 
+        // The handle names a session the primary has since left: the republish after that rotation
+        // failed, or this account was still starting up when it ran. Retry it every cycle until it
+        // takes, rather than leave this account's followers pointed at a session that stops being
+        // hosted once its last player goes.
+        String handleSession = handleSessionId;
+        if (handleSession != null && !handleSession.equals(parent.getSessionId())) {
+            republish(handleSession);
+            return;
+        }
+
         try {
             updateSession();
         } catch (SessionUpdateException e) {
@@ -173,11 +204,18 @@ public class SubSessionManager extends SessionManagerCore {
      * makes after a dropped websocket, so it is not a new path: it rejoins the current session and
      * creates the handle against it.
      * <p>
+     * Once it is in, it leaves the previous session. The primary keeps hosting that one for the
+     * players still in it, and its seat is one more their friends can take; a bot has no reason to
+     * hold it. If this account could not move, it stays where it is, since its handle still points
+     * there, and refresh() tries again on the next cycle.
+     * <p>
      * Synchronized together with refresh(). A periodic refresh landing while this runs would find
      * the websocket in the middle of being replaced, take that for a dropped connection, and rebuild
      * it concurrently - two threads each closing the other's socket.
+     *
+     * @param previousSessionId The session the primary has just rotated away from
      */
-    public synchronized void republish() {
+    public synchronized void republish(String previousSessionId) {
         if (!initialized) {
             return;
         }
@@ -186,6 +224,13 @@ public class SubSessionManager extends SessionManagerCore {
             createSession();
         } catch (SessionCreationException | SessionUpdateException e) {
             logger.error("Failed to point this account at the new session; its followers still see the previous one", e);
+            return;
+        }
+
+        try {
+            leaveSession(previousSessionId);
+        } catch (SessionUpdateException e) {
+            logger.debug("Could not leave the previous session, its seat stays taken until this account reconnects: " + e.getMessage());
         }
     }
 

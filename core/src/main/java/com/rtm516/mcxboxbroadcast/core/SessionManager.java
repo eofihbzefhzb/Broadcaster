@@ -15,6 +15,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -27,7 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Simple manager to authenticate and create sessions on Xbox
@@ -41,6 +45,52 @@ public class SessionManager extends SessionManagerCore {
 
     /** When the last session rotation was claimed; see claimRestartSlot(). */
     private final AtomicLong lastRestartAttempt = new AtomicLong(0L);
+
+    /**
+     * The session the primary rotated away from, still hosted for the players left in it; null when
+     * there is none. See maintainRetiredSession().
+     * <p>
+     * Only one is ever kept. The one just left is where nearly everyone still playing is, and every
+     * hosted session costs a read on each membership change plus one per update cycle - the same Xbox
+     * limits that answered the member-cap restart storm with a 429 are the ones this would run into
+     * if it held on to every session since startup.
+     */
+    private final AtomicReference<RetiredSession> retiredSession = new AtomicReference<>();
+
+    /**
+     * Held by maintainRetiredSession() for its network calls, so two runs never interleave.
+     * <p>
+     * rotateSession() never takes it: it can run on the RTA websocket thread that issues nonces for
+     * the current session, and waiting there behind a slow read of the old session would stop
+     * anyone joining the new one. It swaps retiredSession atomically instead.
+     */
+    private final Object retiredSessionLock = new Object();
+
+    /** Set while a maintenance run is queued; see scheduleRetiredMaintenance(). */
+    private final AtomicBoolean retiredMaintenanceQueued = new AtomicBoolean();
+
+    /** Whether the queued run must PUT even without a nonce change. */
+    private final AtomicBoolean retiredMaintenanceForced = new AtomicBoolean();
+
+    /** Bounds every request made for the previous session, since they run under a lock. */
+    private static final Duration RETIRED_SESSION_REQUEST_TIMEOUT = Duration.ofSeconds(15);
+
+    /** A backstop, not the normal way out: a retired session is dropped as soon as it has no players. */
+    private static final Duration RETIRED_SESSION_MAX_AGE = Duration.ofHours(12);
+
+    private static final class RetiredSession {
+        final String id;
+        /** Xuid -> nonce, carried over from when this was the current session, and kept issuing. */
+        final Map<String, String> nonces;
+        /** Xuid -> gamertag as of the last read, or null before the first; for arrival logs. */
+        Map<String, String> members;
+        final Instant retiredAt = Instant.now();
+
+        RetiredSession(String id, Map<String, String> nonces) {
+            this.id = id;
+            this.nonces = nonces;
+        }
+    }
 
     private CoreConfig.FriendSyncConfig friendSyncConfig;
     private Runnable restartCallback;
@@ -195,6 +245,11 @@ public class SessionManager extends SessionManagerCore {
             // Even if the primary update failed, the sub-accounts still need their membership
             // refreshed - their own websockets may be perfectly healthy.
             refreshSubSessions();
+
+            // Unconditionally here, not only on change: if checkConnection() has replaced the
+            // websocket since the last cycle, the membership in the previous session still names
+            // the old connection, and until it is re-PUT that session's events never arrive.
+            scheduleRetiredMaintenance(true);
         }
     }
 
@@ -217,6 +272,11 @@ public class SessionManager extends SessionManagerCore {
 
     @Override
     public void updateNonces() throws SessionUpdateException {
+        // The event behind this call can come from the previous session as well as this one, and
+        // nothing in it says which, so give the previous one a look too. On the pool, so a friend
+        // joining the current session never waits behind a read of the old one.
+        scheduleRetiredMaintenance(false);
+
         // Get session
         HttpRequest createSessionRequest = HttpRequest.newBuilder()
             .uri(URI.create(Constants.CREATE_SESSION.formatted(this.sessionInfo.getSessionId())))
@@ -256,18 +316,10 @@ public class SessionManager extends SessionManagerCore {
 
             for (String xuid : activeXuids) {
                 if (!nonces.containsKey(xuid)) {
-                    // Generate a nonce
-                    byte[] bytes = new byte[8];
-                    ThreadLocalRandom.current().nextBytes(bytes);
-                    StringBuilder hex = new StringBuilder(16);
-                    for (byte b : bytes) {
-                        hex.append(String.format("%02x", b));
-                    }
+                    String nonce = newNonce();
+                    nonces.put(xuid, nonce);
 
-                    // Put the nonce
-                    nonces.put(xuid, hex.toString());
-
-                    logger.debug("Generated nonce for XUID " + xuid + ": " + hex);
+                    logger.debug("Generated nonce for XUID " + xuid + ": " + nonce);
 
                     hasChanges = true;
                 }
@@ -328,21 +380,7 @@ public class SessionManager extends SessionManagerCore {
             return;
         }
 
-        Map<String, String> current = new HashMap<>();
-        for (SessionMember member : sessionResponse.members().values()) {
-            if (member == null || member.constants() == null) {
-                continue;
-            }
-            var system = member.constants().get("system");
-            if (system == null || system.xuid() == null) {
-                continue;
-            }
-            // The session document carries the gamertag; fall back to the xuid when it is absent.
-            String name = member.gamertag() == null || member.gamertag().isBlank()
-                ? system.xuid()
-                : member.gamertag();
-            current.put(system.xuid(), name);
-        }
+        Map<String, String> current = memberNames(sessionResponse);
 
         if (knownMembers == null) {
             knownMembers = current;
@@ -551,6 +589,11 @@ public class SessionManager extends SessionManagerCore {
      * which is the full one, until each account's websocket happened to drop. See
      * SubSessionManager#republish().
      * <p>
+     * The previous session is not abandoned. The players still in it show it to their own friends,
+     * and those friends can only get in if the host keeps writing nonces there, so the primary goes
+     * on hosting it until its last player has left - see maintainRetiredSession(). The sub-accounts
+     * leave it as they move, which frees their seats for exactly those friends.
+     * <p>
      * The id has to change: reusing it is what lets members survive a process restart, but here it
      * would bring all 28 members straight back, leaving the cap check true and the rotation
      * looping. That loop is what produced 58 restarts inside a minute, a thread pool torn down
@@ -561,8 +604,12 @@ public class SessionManager extends SessionManagerCore {
      */
     private void rotateSession() {
         String previous = this.sessionInfo.getSessionId();
+        Map<String, String> previousNonces = this.nonces;
         try {
             this.sessionInfo.setSessionId(UUID.randomUUID().toString());
+            // The new session issues its own nonces. The ones already handed out belong to the
+            // previous session, which keeps them below.
+            this.nonces = new HashMap<>();
 
             // Before createSession(), not after: it ends by calling updateSession(), which diffs
             // the member list. Left alone, that diff would compare the new session's empty list
@@ -581,18 +628,236 @@ public class SessionManager extends SessionManagerCore {
                 logger.debug("Could not store the rotated Xbox session id: " + e.getMessage());
             }
 
-            logger.info("Published a new Xbox session; pointing " + subSessionManagers.size() + " sub-account(s) at it");
+            RetiredSession dropped = retiredSession.getAndSet(new RetiredSession(previous, previousNonces));
+
+            logger.info("Published a new Xbox session; pointing " + subSessionManagers.size()
+                + " sub-account(s) at it and still hosting the previous one for the players in it");
 
             // On the pool, one task per account, as refreshSubSessions() does: each republish waits
             // on its own RTA connection id, and this method can be running on the primary's
             // websocket thread, which must not sit through several of those in series.
             for (SubSessionManager subSessionManager : subSessionManagers.values()) {
-                scheduledThreadPool.execute(subSessionManager::republish);
+                scheduledThreadPool.execute(() -> subSessionManager.republish(previous));
+            }
+
+            // createSession() gave this account a new websocket, so its membership in the previous
+            // session names a connection that no longer exists. Re-register it now rather than a
+            // whole update cycle later, before Xbox marks the host inactive there.
+            scheduleRetiredMaintenance(true);
+
+            if (dropped != null) {
+                // Under the lock, on the pool: a maintenance run still working on the dropped session
+                // could otherwise PUT this account back into it just after it left, and nothing would
+                // ever look at that session again to take it back out.
+                scheduledThreadPool.execute(() -> {
+                    synchronized (retiredSessionLock) {
+                        leaveRetiredSession(dropped.id, "a newer one took its place");
+                    }
+                });
             }
         } catch (Exception e) {
             this.sessionInfo.setSessionId(previous);
+            this.nonces = previousNonces;
             logger.error("Failed to rotate the full session, keeping the current one", e);
         }
+    }
+
+    /**
+     * Keeps the previous session joinable for as long as players are still in it.
+     * <p>
+     * Everyone playing in a session shows it on their friends' lists, and joining it needs a nonce
+     * that the host writes into it - updateNonces() only ever does that for the current session. Left
+     * alone, the session the primary rotated away from would go on showing for all the friends of
+     * everyone still playing in it, and each friend who picked it would sit on the loading screen
+     * waiting for a nonce that never comes. This does for the previous session what updateNonces()
+     * does for the current one, and the PUT that carries the nonces also keeps the primary a member
+     * with a live connection, which is what keeps that session's change events arriving at all.
+     * <p>
+     * Hosting ends once no player is left - own accounts do not count - or at
+     * RETIRED_SESSION_MAX_AGE, and the primary then leaves the session. Nothing here throws: this runs
+     * beside the current session's update and nonce paths and must never be able to break them.
+     *
+     * @param always true to PUT even when no nonce changed, which re-registers the membership against
+     *               whichever websocket is live now
+     */
+    private void maintainRetiredSession(boolean always) {
+        synchronized (retiredSessionLock) {
+            RetiredSession retired = retiredSession.get();
+            if (retired == null) {
+                return;
+            }
+
+            try {
+                if (Duration.between(retired.retiredAt, Instant.now()).compareTo(RETIRED_SESSION_MAX_AGE) > 0) {
+                    closeRetiredSession(retired, "it has been hosted for " + RETIRED_SESSION_MAX_AGE.toHours() + " hours");
+                    return;
+                }
+
+                HttpResponse<String> read = httpClient.send(HttpRequest.newBuilder()
+                    .uri(URI.create(Constants.CREATE_SESSION.formatted(retired.id)))
+                    .timeout(RETIRED_SESSION_REQUEST_TIMEOUT)
+                    .header("Authorization", getTokenHeader())
+                    .header("x-xbl-contract-version", "107")
+                    .GET()
+                    .build(), HttpResponse.BodyHandlers.ofString());
+
+                if (read.statusCode() == 404 || read.statusCode() == 403) {
+                    // Gone, or this account may no longer read it: either way there is nothing to host.
+                    if (retiredSession.compareAndSet(retired, null)) {
+                        logger.info("Stopped hosting the previous Xbox session: Xbox no longer has it");
+                    }
+                    return;
+                }
+                if (read.statusCode() != 200) {
+                    logger.debug("Could not read the previous Xbox session (" + read.statusCode() + "), trying again next time");
+                    return;
+                }
+
+                CreateSessionResponse session = Constants.GSON.fromJson(read.body(), CreateSessionResponse.class);
+                if (session == null || session.members() == null) {
+                    return;
+                }
+                Map<String, String> members = memberNames(session);
+
+                // The same announcements as the current session, labelled so the two cannot be confused.
+                if (retired.members != null) {
+                    for (Map.Entry<String, String> entry : members.entrySet()) {
+                        if (!retired.members.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
+                            logger.info(entry.getValue() + " joined the previous Xbox session (" + members.size() + " members)");
+                        }
+                    }
+                    for (Map.Entry<String, String> entry : retired.members.entrySet()) {
+                        if (!members.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
+                            logger.info(entry.getValue() + " is no longer in the previous Xbox session (" + members.size() + " members)");
+                        }
+                    }
+                }
+                retired.members = members;
+
+                if (members.keySet().stream().allMatch(this::isOwnAccount)) {
+                    closeRetiredSession(retired, "its last player has left");
+                    return;
+                }
+
+                // The rule updateNonces() applies to the current session.
+                Set<String> activeXuids = new HashSet<>(members.keySet());
+                activeXuids.remove(sessionInfo.getXuid());
+                boolean changed = retired.nonces.keySet().retainAll(activeXuids);
+                for (String xuid : activeXuids) {
+                    if (!retired.nonces.containsKey(xuid)) {
+                        retired.nonces.put(xuid, newNonce());
+                        changed = true;
+                    }
+                }
+
+                // A rotation may have replaced this session while it was being read. The run queued
+                // behind this one picks up the replacement, and the dropped session is being left.
+                if (retiredSession.get() != retired) {
+                    return;
+                }
+
+                if (changed || always) {
+                    // Sent directly instead of through updateSessionInternal(), which saves every
+                    // response as currentSessionResponse.json: the snapshot would then describe a
+                    // session the server no longer advertises.
+                    HttpResponse<String> write = httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create(Constants.CREATE_SESSION.formatted(retired.id)))
+                        .timeout(RETIRED_SESSION_REQUEST_TIMEOUT)
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", getTokenHeader())
+                        .header("x-xbl-contract-version", "107")
+                        .PUT(HttpRequest.BodyPublishers.ofString(Constants.GSON.toJson(new CreateSessionRequest(sessionInfo, retired.nonces))))
+                        .build(), HttpResponse.BodyHandlers.ofString());
+                    if (write.statusCode() != 200 && write.statusCode() != 201) {
+                        logger.warn("Could not issue nonces in the previous Xbox session (" + write.statusCode() + "), so friends joining it may not get in: " + write.body());
+                    }
+                }
+            } catch (Exception e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                logger.debug("Could not maintain the previous Xbox session: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Stops hosting the given retired session and leaves it - only if it is still the one held. If a
+     * rotation has already replaced it, that rotation is leaving it and announcing why.
+     */
+    private void closeRetiredSession(RetiredSession retired, String reason) {
+        if (retiredSession.compareAndSet(retired, null)) {
+            leaveRetiredSession(retired.id, reason);
+        }
+    }
+
+    /**
+     * Queues a maintainRetiredSession() run on the pool, coalescing requests that arrive while one is
+     * already waiting.
+     * <p>
+     * It is asked for on every membership change as well as every update cycle, and each run holds
+     * the lock through its network calls. Dispatching one task per request would let a burst of
+     * arrivals park most of the pool's five threads on that lock, starving the sub-account refreshes
+     * and republishes that share it. Coalescing keeps it to at most one run working and one waiting.
+     *
+     * @param always whether the run must PUT even without a nonce change; sticky until a run takes it
+     */
+    private void scheduleRetiredMaintenance(boolean always) {
+        if (retiredSession.get() == null) {
+            return;
+        }
+        if (always) {
+            retiredMaintenanceForced.set(true);
+        }
+        if (retiredMaintenanceQueued.compareAndSet(false, true)) {
+            scheduledThreadPool.execute(() -> {
+                // Cleared before running, so a request arriving mid-run queues exactly one more.
+                retiredMaintenanceQueued.set(false);
+                maintainRetiredSession(retiredMaintenanceForced.getAndSet(false));
+            });
+        }
+    }
+
+    private void leaveRetiredSession(String sessionId, String reason) {
+        logger.info("Stopped hosting the previous Xbox session: " + reason);
+        try {
+            leaveSession(sessionId);
+        } catch (SessionUpdateException e) {
+            logger.debug("Could not leave the previous Xbox session: " + e.getMessage());
+        }
+    }
+
+    /** A fresh join nonce: eight random bytes as sixteen hex digits, the format updateNonces() issues. */
+    private static String newNonce() {
+        byte[] bytes = new byte[8];
+        ThreadLocalRandom.current().nextBytes(bytes);
+        StringBuilder hex = new StringBuilder(16);
+        for (byte b : bytes) {
+            hex.append(String.format("%02x", b));
+        }
+        return hex.toString();
+    }
+
+    /**
+     * Xuid -> gamertag for every member of a session document, falling back to the xuid when the
+     * document leaves the gamertag out.
+     */
+    private static Map<String, String> memberNames(CreateSessionResponse sessionResponse) {
+        Map<String, String> names = new HashMap<>();
+        for (SessionMember member : sessionResponse.members().values()) {
+            if (member == null || member.constants() == null) {
+                continue;
+            }
+            var system = member.constants().get("system");
+            if (system == null || system.xuid() == null) {
+                continue;
+            }
+            String name = member.gamertag() == null || member.gamertag().isBlank()
+                ? system.xuid()
+                : member.gamertag();
+            names.put(system.xuid(), name);
+        }
+        return names;
     }
 
     private void reuseStoredSessionId() {

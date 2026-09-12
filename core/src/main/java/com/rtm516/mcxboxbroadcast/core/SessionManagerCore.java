@@ -375,6 +375,44 @@ public abstract class SessionManagerCore {
     }
 
     /**
+     * Removes this account from a session, which need not be the one this manager currently holds.
+     * <p>
+     * The body is written out as literal JSON on purpose. MPSD removes the caller when members.me is
+     * null, but Constants.GSON does not serialize nulls, so building the same request from a model
+     * sends an empty members object - a request that succeeds and leaves the account where it was.
+     *
+     * @param sessionId The id of the session to leave
+     * @throws SessionUpdateException If Xbox refuses the request or it cannot be sent
+     */
+    protected void leaveSession(String sessionId) throws SessionUpdateException {
+        HttpRequest leaveRequest = HttpRequest.newBuilder()
+            .uri(URI.create(Constants.CREATE_SESSION.formatted(sessionId)))
+            // Bounded: SessionManager calls this while holding the lock that serializes its
+            // previous-session maintenance, and an unanswered request must not hold it forever.
+            .timeout(Duration.ofSeconds(15))
+            .header("Content-Type", "application/json")
+            .header("Authorization", getTokenHeader())
+            .header("x-xbl-contract-version", "107")
+            .PUT(HttpRequest.BodyPublishers.ofString("{\"members\":{\"me\":null}}"))
+            .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(leaveRequest, HttpResponse.BodyHandlers.ofString());
+            // 204 when this was the last member and the session went with it; 404 when it was already
+            // gone. Either way this account is no longer in it.
+            int status = response.statusCode();
+            if (status != 200 && status != 201 && status != 204 && status != 404) {
+                throw new SessionUpdateException("Leaving session " + sessionId + " returned " + status + ": " + response.body());
+            }
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new SessionUpdateException("Leaving session " + sessionId + " failed: " + e.getMessage());
+        }
+    }
+
+    /**
      * The internal method for making the web request to update the session
      *
      * @param url The url to send the PUT request containing the session data
