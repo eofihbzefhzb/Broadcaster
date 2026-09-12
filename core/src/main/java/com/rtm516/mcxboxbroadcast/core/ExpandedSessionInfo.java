@@ -48,11 +48,6 @@ public class ExpandedSessionInfo extends SessionInfo {
         setRelayTargetPort(sessionInfo.getRelayTargetPort());
         setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
-        if (sessionInfo.isExternalNetherNetHosted()
-            && sessionInfo.getExternalNetherNetId() != null
-            && !sessionInfo.getExternalNetherNetId().isBlank()) {
-            this.netherNetId = new BigInteger(sessionInfo.getExternalNetherNetId());
-        }
     }
 
     public void updateSessionInfo(SessionInfo sessionInfo) {
@@ -75,6 +70,17 @@ public class ExpandedSessionInfo extends SessionInfo {
         setRelayTargetPort(sessionInfo.getRelayTargetPort());
         setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
+
+        // netherNetId is what the session advertises under SupportedConnections, and the external id
+        // above is only the value it is derived from. The constructor derives it once; without doing
+        // it again here, a new id discovered from Geyser at runtime was logged as "Updated external
+        // NetherNet ID" and copied into externalNetherNetId while the session went on advertising the
+        // old one, leaving every join searching for a listener that no longer existed.
+        if (sessionInfo.isExternalNetherNetHosted()
+            && sessionInfo.getExternalNetherNetId() != null
+            && !sessionInfo.getExternalNetherNetId().isBlank()) {
+            this.netherNetId = new BigInteger(sessionInfo.getExternalNetherNetId());
+        }
     }
 
     public String getConnectionId() {
