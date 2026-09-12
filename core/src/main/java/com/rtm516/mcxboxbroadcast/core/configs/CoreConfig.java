@@ -204,9 +204,9 @@ public interface CoreConfig {
             Whether the session announces itself as a LAN game, sent as LanGame.
             This is the one visibility field the upstream NetherNet rewrite changed: builds up to
             49 published true, build 50 switched it to false when it moved the session from RakNet
-            to WebRTC. It is what makes Minecraft list the session among joinable worlds rather
-            than only reachable through a direct invite, so false costs reach without gaining
-            anything here - the transport is chosen by TransportLayer, not by this flag.
+            to WebRTC. What the client does with it has not been isolated - sessions published with
+            false still appeared - so true is kept only because it matches the builds that are known
+            to have worked. It does not select the transport; TransportLayer does.
             Leave it true unless you are deliberately testing the build 50 behaviour.""")
         @DefaultBoolean(true)
         boolean lanGame();
@@ -263,11 +263,11 @@ public interface CoreConfig {
             Leave empty to auto-discover it.""")
         @DefaultString("")
         String externalNetworkId();
-        
+
         @Comment("""
             The absolute path to the Geyser portal-session-status.json file.
             If left empty, Broadcaster will attempt to guess the path relative to its own folder.
-            Example: "C:\\path\\to\\Velocity\\plugins\\Geyser-Velocity\\portal-session-status.json" """)
+            Example: C:\\path\\to\\Velocity\\plugins\\Geyser-Velocity\\portal-session-status.json""")
         @DefaultString("")
         String statusFilePath();
 
@@ -284,7 +284,7 @@ public interface CoreConfig {
         @Comment("""
             How long standalone mode should wait for the local Geyser portal bridge to publish its
             automatically generated NetherNet ID when external-network-id is empty.
-            This makes it safe to start MCXboxBroadcast before Paper/Geyser.""")
+            This makes it safe to start MCXboxBroadcast before Velocity/Geyser.""")
         @DefaultNumeric(120)
         @NumericRange(from = 0, to = Integer.MAX_VALUE)
         int discoveryTimeoutSeconds();

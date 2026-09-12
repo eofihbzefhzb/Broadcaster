@@ -454,8 +454,8 @@ public abstract class SessionManagerCore {
 
             if (createSessionResponse.statusCode() == 200 || createSessionResponse.statusCode() == 201) {
                 // Keep a live, sanitized-by-construction copy of the Xbox session
-                // response. This is used by the local harness and diagnostics; it
-                // contains the API response only and never request headers/tokens.
+                // response, for checking what is actually published (and dumpsession);
+                // it contains the API response only and never request headers/tokens.
                 try {
                     storageManager.currentSessionResponse(createSessionResponse.body());
                 } catch (IOException exception) {

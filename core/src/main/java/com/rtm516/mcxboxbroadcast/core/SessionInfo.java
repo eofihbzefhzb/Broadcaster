@@ -15,7 +15,7 @@ public class SessionInfo {
     private String ip;
     private int port;
     private String joinability = "joinable_by_friends";
-    /** Xbox MPSD system-level gates. "followed" (default) or "none". */
+    /** Xbox MPSD system-level gates. "followed" (default); Xbox rejects "none" for Minecraft's session template. */
     private String readRestriction = "followed";
     private String joinRestriction = "followed";
     private String worldType = "Survival";
