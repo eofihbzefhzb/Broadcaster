@@ -2,7 +2,7 @@
 
 This fork is focused on one job: publish an Xbox joinable session for a Geyser-based server where the real gameplay join terminates inside a paired Geyser NetherNet fork.
 
-This shows up to the authenticated accounts friends in-game as a joinable session. This work was built to bring back something the Bedrock community lost a long time ago: joining and inviting directly from the game. It also prepares for a future friends-of-friends flow, so players can join while their friends are already on your server.
+This shows up to the authenticated accounts friends in-game as a joinable session. This work was built to bring back something the Bedrock community lost a long time ago: joining and inviting directly from the game. It also works friends-of-friends: while a player is in the session, the people they follow can see it and join through them.
 
 It is not documented here as the stock upstream project. This README only covers the fork behavior added in this repo.
 
@@ -96,12 +96,16 @@ xbox-session:
   # Xbox MPSD gates. Both must stay "followed" - see "Session visibility" below.
   read-restriction: followed
   join-restriction: followed
+  # 3 = friends of friends (default), 4 = public. Neither reaches past the "followed" gates.
+  broadcast-setting: 3
 
 friend-sync:
-  auto-follow: false
-  auto-unfollow: false
-  initial-invite: false
+  auto-follow: true
+  auto-unfollow: true
+  initial-invite: true
   expiry:
+    # Leave off. Players join through Geyser, not through this process, so nothing records
+    # their visits and every friend would be dropped `days` after first being seen.
     enabled: false
 ```
 
@@ -119,8 +123,16 @@ a sub-account's profile sees the primary world and joins through it. Each sub-ac
 carries its own friends list, which is how the setup scales past the 2000-friend cap
 on a single account.
 
-There is no setting that opens the world to friends-of-friends. All three candidates
-were tried and none works:
+Friends-of-friends is `broadcast-setting: 3`, the default: it is what the "Friends of
+friends" button in Minecraft publishes, alongside `joinable_by_friends`. Xbox lets anyone
+followed by a member of the session see and join it, and players who join become members,
+so every player in the session opens it to the people they follow.
+
+A session holds 30 members. At 28 the publisher moves its accounts to a fresh session and
+keeps hosting the previous one until its last player leaves, so the friends of the players
+still in it can go on joining.
+
+Nothing widens the audience beyond that. Both obvious attempts were tried:
 
 - `joinability: joinable_by_friends_of_friends` breaks joining outright. The client
   connects, completes the Bedrock handshake, then goes silent and times out - direct
@@ -130,18 +142,20 @@ were tried and none works:
   sessions with the 'userAuthorizationStyle' capability.* Minecraft's session template
   carries that capability, so the session simply fails to publish.
 
-Reach comes from the accounts' friends lists instead. Each account holds up to 2000
-friends and `auto-follow` accepts incoming requests automatically, so adding
+Beyond the players themselves, reach comes from the accounts' friends lists. Each account
+holds up to 2000 friends and `auto-follow` follows back everyone who follows it, so adding
 sub-accounts is what widens the audience.
 
-The standalone console provides two safe operational commands:
+The standalone console provides:
 
 ```text
-status                 # session, NetherNet ID, PmsgId presence, health
-invite <xuid>          # one explicit invitation; validated and rate-limited
+accounts list          # every account and how many people it follows
+accounts add <id>      # add a sub-account; it asks for that account's Xbox sign-in
+accounts remove <id>   # remove a sub-account and its cached sign-in
+dumpsession            # write the last and current session documents to files
+restart                # restart session publishing
+version, help, stop
 ```
-
-Automatic friend-list changes and bulk invitations are disabled by default.
 
 ### Joining and diagnosing
 
@@ -157,7 +171,7 @@ session created
 -> Java/Paper connection established
 ```
 
-If a join fails, inspect the Paper/Geyser log and classify the last stage:
+If a join fails, inspect the Velocity log (Geyser logs there) and classify the last stage:
 
 - no offer: session publication, account visibility, or Xbox signaling
 - offer/signals but no peer: NAT/ICE or transport failure
@@ -180,10 +194,6 @@ Recommended runtime layout:
 That removes the old gameplay relay bottleneck and is the smoothest setup from this work.
 
 ## Releases
-
-Current release line:
-
-- Build `2`
 
 Assets:
 
