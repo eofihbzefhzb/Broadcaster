@@ -17,8 +17,8 @@ import org.cloudburstmc.protocol.bedrock.util.EncryptionUtils;
 import org.cloudburstmc.protocol.common.PacketSignal;
 import org.jose4j.json.JsonUtil;
 import org.jose4j.json.internal.json_simple.JSONObject;
-import org.jose4j.jws.JsonWebSignature;
 
+import java.nio.charset.StandardCharsets;
 import java.security.interfaces.ECPublicKey;
 
 public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
@@ -26,7 +26,7 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
     private final SessionManagerCore sessionManager;
     private final Logger logger;
     private final PacketCompressionAlgorithm compressionAlgorithm;
-    
+
     private JSONObject skinData;
     private ChainValidationResult chain;
     private String clientJwt;
@@ -85,10 +85,16 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
             clientJwt = packet.getClientJwt();
 
             ECPublicKey identityPublicKey = (ECPublicKey) chain.identityClaims().parsedIdentityPublicKey();
-            JsonWebSignature jws = new JsonWebSignature();
-            jws.setCompactSerialization(clientJwt);
-            EncryptionUtils.verifyClientData(clientJwt, identityPublicKey);
-            skinData = new JSONObject(JsonUtil.parseJson(jws.getUnverifiedPayload()));
+            // verifyClientData() reports a bad signature by returning null, not by throwing, so its
+            // result has to be checked - and the skin data read from what it verified, not from the
+            // raw token, or a client could hand over data its identity key never signed.
+            byte[] clientData = EncryptionUtils.verifyClientData(clientJwt, identityPublicKey);
+            if (clientData == null) {
+                logger.warn("Rejected a login from " + session.getSocketAddress() + " whose client data is not signed by its identity");
+                session.disconnect("disconnectionScreen.notAuthenticated");
+                return PacketSignal.HANDLED;
+            }
+            skinData = new JSONObject(JsonUtil.parseJson(new String(clientData, StandardCharsets.UTF_8)));
 
             logger.info("Player " + chain.identityClaims().extraData.displayName + " (" + session.getSocketAddress() + ") joined the session");
             initializeBridgeSession();
