@@ -137,6 +137,8 @@ public class SubSessionManager extends SessionManagerCore {
 
     @Override
     protected boolean handleFriendship() {
+        // TODO Some form of force flag just in case the master friends list is full
+
         // Add the main account
         boolean subAdd = friendManager().addIfRequired(parent.getXuid(), parent.getGamertag());
 
