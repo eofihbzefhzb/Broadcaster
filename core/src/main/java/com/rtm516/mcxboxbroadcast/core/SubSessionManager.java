@@ -53,9 +53,9 @@ public class SubSessionManager extends SessionManagerCore {
     /**
      * The primary session's id, not this account's own.
      * <p>
-     * This is what makes the whole thing work: {@code createSessionHandle()} in the base class builds
-     * the "activity" handle from this value, so the sub-account's Xbox presence points at the primary
-     * session. Returning a private id here is what previously made each sub-account look like the host
+     * This is what makes the whole thing work: {@code createSession()} in the base class builds the
+     * "activity" handle from this value, so the sub-account's Xbox presence points at the primary
+     * session. It reads the value once, when the handle is created - see republish(). Returning a private id here is what previously made each sub-account look like the host
      * of its own separate world.
      */
     @Override
