@@ -299,16 +299,16 @@ public interface CoreConfig {
         @NumericRange(from = 20, to = Integer.MAX_VALUE)
         int updateInterval();
 
-        @Comment("Should we automatically follow people that follow us. Disabled by default for safe session publishing.")
-        @DefaultBoolean(false)
+        @Comment("Should we automatically follow people that follow us")
+        @DefaultBoolean(true)
         boolean autoFollow();
 
-        @Comment("Should we automatically unfollow people that no longer follow us. Disabled by default for safe session publishing.")
-        @DefaultBoolean(false)
+        @Comment("Should we automatically unfollow people that no longer follow us")
+        @DefaultBoolean(true)
         boolean autoUnfollow();
 
-        @Comment("Should we automatically send an invite when a friend is added. Disabled by default; use invite <xuid> explicitly.")
-        @DefaultBoolean(false)
+        @Comment("Should we automatically send an invite when a friend is added")
+        @DefaultBoolean(true)
         boolean initialInvite();
 
         @Comment("Friend expiry settings")
@@ -316,7 +316,14 @@ public interface CoreConfig {
 
         @ConfigSerializable
         interface ExpiryConfig {
-            @Comment("Should we unfriend people that haven't joined the server in a while. Disabled by default for safe session publishing.")
+            @Comment("""
+                Should we unfriend people that haven't joined the server in a while.
+                Leave this off. Upstream records a friend's last visit when they connect through
+                the Broadcaster's own RedirectPacketHandler; with the NetherNet transport players
+                connect to Geyser instead, that handler no longer exists, and nothing refreshes the
+                record after it is first written. Turned on, this would unfriend every friend
+                'days' after they were first seen - daily players included - and take the server
+                out of all of their friends lists.""")
             @DefaultBoolean(false)
             boolean enabled();
 
