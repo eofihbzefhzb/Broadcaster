@@ -575,21 +575,6 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
-     * Publish into the same Xbox session document as the previous run, when one is known.
-     * <p>
-     * The id is otherwise drawn fresh on every start, which hands Xbox a brand new and empty
-     * session. Players already in game keep playing - Geyser owns their connection, not this
-     * process - but they are not members of the new session, and it is membership that keeps the
-     * server visible to their friends. Restarting therefore silently threw away every player who
-     * was advertising the server, and they only came back by disconnecting and rejoining.
-     * <p>
-     * Only the primary session needs this: the sub-sessions join its session rather than holding
-     * one of their own, so its document is where every member lives.
-     * <p>
-     * Safe when it does not work out. If Xbox has already discarded the old session, the update
-     * simply recreates it and the run behaves exactly as a fresh id would have.
-     */
-    /**
      * Publishes a brand new, empty Xbox session under a fresh id, in place.
      * <p>
      * This replaces the full restart() the member cap used to trigger. A restart tears down this
@@ -888,6 +873,21 @@ public class SessionManager extends SessionManagerCore {
         return names;
     }
 
+    /**
+     * Publish into the same Xbox session document as the previous run, when one is known.
+     * <p>
+     * The id is otherwise drawn fresh on every start, which hands Xbox a brand new and empty
+     * session. Players already in game keep playing - Geyser owns their connection, not this
+     * process - but they are not members of the new session, and it is membership that keeps the
+     * server visible to their friends. Restarting therefore silently threw away every player who
+     * was advertising the server, and they only came back by disconnecting and rejoining.
+     * <p>
+     * Only the primary session needs this: the sub-sessions join its session rather than holding
+     * one of their own, so its document is where every member lives.
+     * <p>
+     * Safe when it does not work out. If Xbox has already discarded the old session, the update
+     * simply recreates it and the run behaves exactly as a fresh id would have.
+     */
     private void reuseStoredSessionId() {
         try {
             String stored = storageManager().sessionId();
@@ -939,9 +939,6 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
-     * Restart the session manager
-     */
-    /**
      * Lets one session rotation through and turns away anything that arrives during the
      * cooldown, returning true only to the caller that wins the slot.
      * <p>
@@ -964,6 +961,9 @@ public class SessionManager extends SessionManagerCore {
         return now - last >= RESTART_COOLDOWN_MS && lastRestartAttempt.compareAndSet(last, now);
     }
 
+    /**
+     * Restart the session manager
+     */
     public void restart() {
         if (restartCallback != null) {
             restartCallback.run();
