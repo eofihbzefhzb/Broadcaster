@@ -13,7 +13,6 @@ import org.cloudburstmc.protocol.common.PacketSignal;
 
 public final class BridgeClientSession extends BedrockClientSession {
     private BedrockSession sendSession;
-    private BridgePlayerSession player;
 
     public BridgeClientSession(BedrockPeer peer, int subClientId) {
         super(peer, subClientId);
@@ -21,10 +20,6 @@ public final class BridgeClientSession extends BedrockClientSession {
 
     void setSendSession(BedrockSession sendSession) {
         this.sendSession = sendSession;
-    }
-
-    void setPlayer(BridgePlayerSession player) {
-        this.player = player;
     }
 
     @Override

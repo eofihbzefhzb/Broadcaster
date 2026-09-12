@@ -72,6 +72,16 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
     public PacketSignal handle(LoginPacket packet) {
         try {
             chain = EncryptionUtils.validatePayload(packet.getAuthPayload());
+            // Only an identity Xbox actually signed may go further. The bridge re-signs this login
+            // as SELF_SIGNED for the backend, and Geyser trusts SELF_SIGNED logins from the
+            // addresses in trusted-proxy-ips - so relaying an unsigned chain would let anyone who
+            // reaches this listener log in to the backend under any gamertag and xuid they chose.
+            // Geyser applies the same rule to its own clients through validate-bedrock-login.
+            if (!chain.signed()) {
+                logger.warn("Rejected a login from " + session.getSocketAddress() + " whose identity is not signed by Xbox");
+                session.disconnect("disconnectionScreen.notAuthenticated");
+                return PacketSignal.HANDLED;
+            }
             clientJwt = packet.getClientJwt();
 
             ECPublicKey identityPublicKey = (ECPublicKey) chain.identityClaims().parsedIdentityPublicKey();
@@ -104,7 +114,6 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
                 logger
             );
 
-            downstream.setPlayer(proxySession);
             this.session.setPlayer(proxySession);
 
             String authToken = BridgeForgeryUtils.forgeToken(proxySession.getProxyKeyPair(), this.chain.identityClaims().extraData);
