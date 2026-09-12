@@ -28,7 +28,7 @@ public class SubSessionManager extends SessionManagerCore {
 
     /**
      * The primary session id this account's activity handle was last created against, or null before
-     * the first. refresh() compares it with the primary's current id; see there.
+     * the first. refresh() compares it with the primary's published id; see there.
      */
     private volatile String handleSessionId;
 
@@ -61,12 +61,16 @@ public class SubSessionManager extends SessionManagerCore {
      * <p>
      * This is what makes the whole thing work: {@code createSession()} in the base class builds the
      * "activity" handle from this value, so the sub-account's Xbox presence points at the primary
-     * session. It reads the value once, when the handle is created - see republish(). Returning a private id here is what previously made each sub-account look like the host
-     * of its own separate world.
+     * session. Returning a private id here is what previously made each sub-account look like the
+     * host of its own separate world.
+     * <p>
+     * The handle reads it once, when it is created - see republish(). And it is the published id,
+     * not the primary's getSessionId(), which runs ahead of Xbox during a rotation - see
+     * SessionManager#publishedSessionId().
      */
     @Override
     public String getSessionId() {
-        return parent.getSessionId();
+        return parent.publishedSessionId();
     }
 
 
@@ -178,7 +182,7 @@ public class SubSessionManager extends SessionManagerCore {
         // takes, rather than leave this account's followers pointed at a session that stops being
         // hosted once its last player goes.
         String handleSession = handleSessionId;
-        if (handleSession != null && !handleSession.equals(parent.getSessionId())) {
+        if (handleSession != null && !handleSession.equals(parent.publishedSessionId())) {
             republish(handleSession);
             return;
         }
@@ -195,9 +199,9 @@ public class SubSessionManager extends SessionManagerCore {
      * session id.
      * <p>
      * refresh() is not enough for that. It moves the membership, since updateSession() reads
-     * parent.getSessionId() each time, but the activity handle - the thing that puts the server in
-     * this account's followers' friends lists - is only created inside createSession(), with the id
-     * current at that moment. Without this the handle keeps naming the session the primary just left
+     * parent.publishedSessionId() each time, but the activity handle - the thing that puts the server
+     * in this account's followers' friends lists - is only created inside createSession(), with the
+     * id current at that moment. Without this the handle keeps naming the session the primary just left
      * because it was full, and this account's followers can see the server but not get into it.
      * <p>
      * createSession() is the same call init() made for this account and the one checkConnection()
@@ -230,7 +234,10 @@ public class SubSessionManager extends SessionManagerCore {
         try {
             leaveSession(previousSessionId);
         } catch (SessionUpdateException e) {
-            logger.debug("Could not leave the previous session, its seat stays taken until this account reconnects: " + e.getMessage());
+            // createSession() has already closed the websocket that membership was registered on, so
+            // Xbox times the seat out on its own; leaving just frees it straight away.
+            logger.debug("Could not leave the previous session; Xbox will free its seat once the membership times out: "
+                + e.getMessage());
         }
     }
 
@@ -246,7 +253,7 @@ public class SubSessionManager extends SessionManagerCore {
     protected void updateSession() throws SessionUpdateException {
         checkConnection();
 
-        String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(parent.getSessionId()), new JoinSessionRequest(this.sessionInfo));
+        String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(parent.publishedSessionId()), new JoinSessionRequest(this.sessionInfo));
         try {
             // Just confirm the response parses; unlike the primary session we don't restart on
             // high player counts here - the primary session already handles that for the shared backend

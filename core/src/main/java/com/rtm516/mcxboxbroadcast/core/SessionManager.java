@@ -78,11 +78,14 @@ public class SessionManager extends SessionManagerCore {
     /** A backstop, not the normal way out: a retired session is dropped as soon as it has no players. */
     private static final Duration RETIRED_SESSION_MAX_AGE = Duration.ofHours(12);
 
+    /** The id of the primary session as last published on Xbox; see publishedSessionId(). */
+    private volatile String publishedSessionId;
+
     private static final class RetiredSession {
         final String id;
         /** Xuid -> nonce, carried over from when this was the current session, and kept issuing. */
         final Map<String, String> nonces;
-        /** Xuid -> gamertag as of the last read, or null before the first; for arrival logs. */
+        /** Xuid -> gamertag as of the last read, or null before the first; for arrival and departure logs. */
         Map<String, String> members;
         final Instant retiredAt = Instant.now();
 
@@ -127,6 +130,21 @@ public class SessionManager extends SessionManagerCore {
     @Override
     public String getSessionId() {
         return sessionInfo.getSessionId();
+    }
+
+    /**
+     * The id sub-accounts join and point their activity handles at - which is not getSessionId().
+     * <p>
+     * During a rotation sessionInfo already holds the new id for the few seconds createSession() takes
+     * to create that session. A sub-account refresh landing in that window would PUT its membership to
+     * an id Xbox has no session for yet, and that PUT creates one: the sub-account its only member,
+     * none of the host's properties, so no connection for anyone following its handle to use. The
+     * rotation is often triggered from the websocket thread while the periodic refresh runs on the
+     * pool, so that window is really hit. This value only moves once the new session exists.
+     */
+    public String publishedSessionId() {
+        String published = publishedSessionId;
+        return published != null ? published : sessionInfo.getSessionId();
     }
 
     /**
@@ -183,6 +201,9 @@ public class SessionManager extends SessionManagerCore {
         if (!this.initialized) {
             return this.initialized;
         }
+
+        // The session now exists on Xbox, so this is the id the sub-accounts started below may use.
+        this.publishedSessionId = this.sessionInfo.getSessionId();
 
         // Set up the auto friend sync
         this.friendSyncConfig = friendSyncConfig;
@@ -584,7 +605,7 @@ public class SessionManager extends SessionManagerCore {
      * The sub-accounts then have to be pointed at it. Each one advertises the server through an
      * activity handle, and that handle names a session id: it is created once, in createSession(),
      * with whatever id the primary held at that moment. Their membership follows the primary on its
-     * own, because SubSessionManager#updateSession reads parent.getSessionId() on every refresh, but
+     * own, because SubSessionManager#updateSession reads publishedSessionId() on every refresh, but
      * the handle does not - left alone, five of the six doors would keep leading to the old session,
      * which is the full one, until each account's websocket happened to drop. See
      * SubSessionManager#republish().
@@ -628,10 +649,20 @@ public class SessionManager extends SessionManagerCore {
                 logger.debug("Could not store the rotated Xbox session id: " + e.getMessage());
             }
 
+            // Only now that the new session exists may the sub-accounts be sent to it.
+            this.publishedSessionId = this.sessionInfo.getSessionId();
+
             RetiredSession dropped = retiredSession.getAndSet(new RetiredSession(previous, previousNonces));
 
             logger.info("Published a new Xbox session; pointing " + subSessionManagers.size()
                 + " sub-account(s) at it and still hosting the previous one for the players in it");
+
+            // createSession() gave this account a new websocket, so its membership in the previous
+            // session names a connection that no longer exists. Re-register it now rather than a
+            // whole update cycle later, before Xbox marks the host inactive there. Queued ahead of
+            // the republishes below on purpose: the pool has five threads, those five tasks can each
+            // hold one for up to the websocket timeout, and this must not wait behind all of them.
+            scheduleRetiredMaintenance(true);
 
             // On the pool, one task per account, as refreshSubSessions() does: each republish waits
             // on its own RTA connection id, and this method can be running on the primary's
@@ -639,11 +670,6 @@ public class SessionManager extends SessionManagerCore {
             for (SubSessionManager subSessionManager : subSessionManagers.values()) {
                 scheduledThreadPool.execute(() -> subSessionManager.republish(previous));
             }
-
-            // createSession() gave this account a new websocket, so its membership in the previous
-            // session names a connection that no longer exists. Re-register it now rather than a
-            // whole update cycle later, before Xbox marks the host inactive there.
-            scheduleRetiredMaintenance(true);
 
             if (dropped != null) {
                 // Under the lock, on the pool: a maintenance run still working on the dropped session
@@ -760,16 +786,18 @@ public class SessionManager extends SessionManagerCore {
                     // Sent directly instead of through updateSessionInternal(), which saves every
                     // response as currentSessionResponse.json: the snapshot would then describe a
                     // session the server no longer advertises.
+                    String body = Constants.GSON.toJson(new CreateSessionRequest(sessionInfo, retired.nonces));
                     HttpResponse<String> write = httpClient.send(HttpRequest.newBuilder()
                         .uri(URI.create(Constants.CREATE_SESSION.formatted(retired.id)))
                         .timeout(RETIRED_SESSION_REQUEST_TIMEOUT)
                         .header("Content-Type", "application/json")
                         .header("Authorization", getTokenHeader())
                         .header("x-xbl-contract-version", "107")
-                        .PUT(HttpRequest.BodyPublishers.ofString(Constants.GSON.toJson(new CreateSessionRequest(sessionInfo, retired.nonces))))
+                        .PUT(HttpRequest.BodyPublishers.ofString(body))
                         .build(), HttpResponse.BodyHandlers.ofString());
                     if (write.statusCode() != 200 && write.statusCode() != 201) {
-                        logger.warn("Could not issue nonces in the previous Xbox session (" + write.statusCode() + "), so friends joining it may not get in: " + write.body());
+                        logger.warn("Could not issue nonces in the previous Xbox session (" + write.statusCode()
+                            + "), so friends joining it may not get in: " + write.body());
                     }
                 }
             } catch (Exception e) {

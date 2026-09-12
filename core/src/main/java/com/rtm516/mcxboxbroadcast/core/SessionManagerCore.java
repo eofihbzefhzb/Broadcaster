@@ -387,8 +387,9 @@ public abstract class SessionManagerCore {
     protected void leaveSession(String sessionId) throws SessionUpdateException {
         HttpRequest leaveRequest = HttpRequest.newBuilder()
             .uri(URI.create(Constants.CREATE_SESSION.formatted(sessionId)))
-            // Bounded: SessionManager calls this while holding the lock that serializes its
-            // previous-session maintenance, and an unanswered request must not hold it forever.
+            // Bounded: both callers hold a lock while this runs - SessionManager its previous-session
+            // lock, a sub-account its own monitor - and an unanswered request must not hold either
+            // forever.
             .timeout(Duration.ofSeconds(15))
             .header("Content-Type", "application/json")
             .header("Authorization", getTokenHeader())
