@@ -487,12 +487,10 @@ public class StandaloneMain {
                 if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
                     String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
                     if (!networkId.isBlank()) {
-                        // Info only when the id changes; this runs on every discovery and update pass
+                        // Logged only when the id changes; this runs on every discovery and update pass
                         if (!networkId.equals(lastLoggedNetworkId)) {
                             logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
                             lastLoggedNetworkId = networkId;
-                        } else {
-                            logger.debug("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
                         }
                         return networkId;
                     }
