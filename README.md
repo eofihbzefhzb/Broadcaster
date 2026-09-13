@@ -9,8 +9,9 @@ It is not documented here as the stock upstream project. This README only covers
 ## What This Fork Adds
 
 - `external-hosted` NetherNet publish mode for pairing with a separate Geyser ingress host
+- a standalone Bedrock bridge for when `external-hosted` is off, in place of upstream's transfer
+- sub-accounts that join the primary session, and rotation to a fresh session at the member cap
 - a standalone jar release for Xbox session publishing
-- bridge-first defaults with no transfer fallback in the gameplay path
 - docs and config guidance for local-device deployments
 
 ## Reliable Geyser + MCXboxBroadcast Setup
@@ -31,7 +32,7 @@ mode. Geyser owns the live NetherNet connection and Paper owns the Java game.
 
 ### Requirements
 
-- Java 25 for the current development builds
+- Java 17 or newer
 - Velocity, in front of a Paper 1.21.11 backend (or the Java version selected by the paired Geyser build)
 - ViaVersion and Floodgate installed on Velocity
 - The companion Geyser fork installed as `Geyser-Velocity.jar`; it is the only bootstrap that fork builds
@@ -109,11 +110,11 @@ friend-sync:
     enabled: false
 ```
 
-Startup order does not matter. Geyser waits up to 60 seconds for the cache file
-to appear and retries its NetherNet bind in the background (every 10 seconds at
-first, backing off to once a minute) until the Xbox auth source is usable; the publisher in turn waits for a ready `portal-session-status.json`
-before publishing. Whichever starts first waits for the other. No ID copying is
-required.
+Start Velocity/Geyser first, or within `discovery-timeout-seconds` (120 by default) of
+the publisher: the publisher waits that long for a ready `portal-session-status.json` and
+exits if none appears. Geyser waits up to 60 seconds for the cache file and retries its
+NetherNet bind in the background (every 10 seconds at first, backing off to once a minute)
+until the Xbox auth source is usable. No ID copying is required.
 
 ### Session visibility
 
@@ -160,24 +161,25 @@ version, help, stop
 ### Joining and diagnosing
 
 The Bedrock player should join from the Xbox/Minecraft friends session list.
-The expected server log sequence is:
+With `debug-logging: true` under Geyser's `portal-bridge`, a join logs these stages in the
+Velocity log, in order (without it only the last line is printed):
 
 ```text
-session created
--> NetherNet offer/signaling
--> NetherNet peer connected
--> Bedrock session initialized
--> Floodgate authentication completed
--> Java/Paper connection established
+[proxy-bridge] NetherNet offer received
+[proxy-bridge] NetherNet signal sent / received
+[proxy-bridge] NetherNet Bedrock session initialized
+[proxy-bridge] Bedrock authentication completed; Floodgate handoff ready
+[proxy-bridge] Floodgate authentication completed
+[proxy-bridge] <player> joined over NetherNet from <address>
 ```
 
-If a join fails, inspect the Velocity log (Geyser logs there) and classify the last stage:
+If a join fails, classify the last stage that was logged:
 
 - no offer: session publication, account visibility, or Xbox signaling
-- offer/signals but no peer: NAT/ICE or transport failure
-- peer but no Bedrock session: Bedrock protocol/NetherNet transport failure
-- Bedrock session but no Floodgate: authentication or Floodgate key setup
-- Floodgate but no Paper connection: Java/Paper or server shutdown failure
+- offer and signals but no Bedrock session: NAT/ICE or NetherNet transport failure
+- Bedrock session but no authentication: Bedrock protocol or Xbox login failure
+- authentication but no Floodgate line: Floodgate key setup
+- Floodgate but no "joined over NetherNet": Java/Paper connection failure
 
 The client message “NetherNet” or “Door” is only a generic symptom; the
 server-side stage is the useful diagnosis.
@@ -191,6 +193,7 @@ Recommended runtime layout:
 1. `MCXboxBroadcastStandalone.jar` publishes the Xbox Live session
 2. `Geyser-Velocity.jar` from the companion fork hosts the real NetherNet/Bedrock ingress
 3. Bedrock gameplay traffic terminates in Geyser, not in `mcxba`
+
 That removes the old gameplay relay bottleneck and is the smoothest setup from this work.
 
 ## Releases
@@ -226,6 +229,7 @@ In `external-hosted` mode, the important join identifier is the NetherNet networ
 Use this with:
 
 - https://github.com/eofihbzefhzb/Geyser
+
 ## Scope
 
 This README is intentionally limited to the NetherNet fork behavior added here. For the original upstream project history and broader feature set, see the upstream `MCXboxBroadcast/Broadcaster` repository.

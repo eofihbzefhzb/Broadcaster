@@ -20,8 +20,8 @@ import java.util.concurrent.ScheduledExecutorService;
  * sub-account's Xbox profile therefore sees the primary world and can join through it.
  * <p>
  * Sub-accounts still exist to scale past the 2000-friend cap: each one carries its own friends list
- * and funnels those players into the single session the primary account hosts. Because there is only
- * one session, there is only one NetherNet ingress - the Geyser side should run a single shard.
+ * and funnels those players into the single session the primary account hosts, which Geyser's one
+ * NetherNet ingress serves.
  */
 public class SubSessionManager extends SessionManagerCore {
     private final SessionManager parent;
@@ -73,18 +73,13 @@ public class SubSessionManager extends SessionManagerCore {
         return parent.publishedSessionId();
     }
 
-
     /**
-     * Joins the primary session and starts advertising this account's presence in it.
-     * <p>
-     * The periodic "sync from parent" loop that used to live here is gone: it existed to copy the
-     * parent's world name and player counts into this account's own advertisement, and there is no
-     * separate advertisement any more. The primary session is the single source of truth, so there
-     * is nothing left to mirror.
+     * Joins the primary session and starts advertising this account's presence in it. Nothing is
+     * mirrored from the primary afterwards: this account publishes no session properties of its own.
      */
     @Override
     public void init() throws SessionCreationException, SessionUpdateException {
-        this.sessionInfo = new ExpandedSessionInfo("", "", buildShardSessionInfo());
+        this.sessionInfo = new ExpandedSessionInfo("", "", buildMemberSessionInfo());
         super.init();
     }
 
@@ -107,32 +102,31 @@ public class SubSessionManager extends SessionManagerCore {
      * Minimal SessionInfo for this account.
      * <p>
      * A member's {@link JoinSessionRequest} carries only {@code members.me}, built from the xuid and
-     * connection id, so the world/player/NetherNet fields that used to be mirrored from the parent
-     * here are never transmitted any more.
+     * connection id, so the world, player and NetherNet fields of this object are never transmitted.
      * <p>
      * Host and world name are still filled in: {@link ExpandedSessionInfo}'s constructor calls
      * {@code getHostName().isEmpty()} and {@code getWorldName().isEmpty()} without a null check, so
      * leaving them unset throws before this object is ever used.
      */
-    private SessionInfo buildShardSessionInfo() {
+    private SessionInfo buildMemberSessionInfo() {
         ExpandedSessionInfo parentInfo = parent.sessionInfo();
 
-        SessionInfo shardInfo = new SessionInfo();
+        SessionInfo memberInfo = new SessionInfo();
         String hostName = parentInfo != null ? parentInfo.getHostName() : null;
-        shardInfo.setHostName(hostName == null || hostName.isBlank() ? "MCXboxBroadcast" : hostName);
+        memberInfo.setHostName(hostName == null || hostName.isBlank() ? "MCXboxBroadcast" : hostName);
         String worldName = parentInfo != null ? parentInfo.getWorldName() : null;
-        shardInfo.setWorldName(worldName == null || worldName.isBlank() ? shardInfo.getHostName() : worldName);
+        memberInfo.setWorldName(worldName == null || worldName.isBlank() ? memberInfo.getHostName() : worldName);
 
         // MUST be carried over from the parent. SessionManagerCore#createSession only skips
         // setupNetherNet() when this flag is set; without it every sub-session spins up its own
         // local NetherNet listener on an id Geyser never bound, and anyone joining through that
         // account hangs on "Searching for game session" because nothing answers on that id.
         if (parentInfo != null && parentInfo.isExternalNetherNetHosted()) {
-            shardInfo.setExternalNetherNetHosted(true);
-            shardInfo.setExternalNetherNetId(parentInfo.getExternalNetherNetId());
+            memberInfo.setExternalNetherNetHosted(true);
+            memberInfo.setExternalNetherNetId(parentInfo.getExternalNetherNetId());
         }
 
-        return shardInfo;
+        return memberInfo;
     }
 
     @Override
@@ -257,8 +251,8 @@ public class SubSessionManager extends SessionManagerCore {
 
         String responseBody = super.updateSessionInternal(Constants.CREATE_SESSION.formatted(parent.publishedSessionId()), new JoinSessionRequest(this.sessionInfo));
         try {
-            // Just confirm the response parses; unlike the primary session we don't restart on
-            // high player counts here - the primary session already handles that for the shared backend
+            // Just confirm the response parses; unlike the primary session this does not rotate on
+            // high member counts - the primary session handles that for everyone in it
             Constants.GSON.fromJson(responseBody, CreateSessionResponse.class);
         } catch (JsonParseException e) {
             throw new SessionUpdateException("Failed to parse session response: " + e.getMessage());

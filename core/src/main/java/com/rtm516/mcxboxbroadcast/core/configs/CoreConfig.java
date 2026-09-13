@@ -193,9 +193,8 @@ public interface CoreConfig {
             Minecraft's numeric visibility setting for the session, sent as BroadcastSetting.
             3 = friends of friends (the value Minecraft itself publishes, and the default here),
             2 = friends only, 1 = invite only, 4 = public.
-            Note that Xbox applies readRestriction before the client ever reads this, so lowering
-            the restriction is not something this field can do. It is exposed for experimentation;
-            leave it at 3 unless you are deliberately testing another value.""")
+            Xbox applies read-restriction before the client ever reads this, so no value here
+            reaches anyone the "followed" gate has already excluded.""")
         @DefaultNumeric(3)
         @NumericRange(from = 0, to = 4)
         int broadcastSetting();
@@ -275,8 +274,7 @@ public interface CoreConfig {
             Optional label for running several broadcaster instances against separate backends.
             When set above 0 the advertised secondary MOTD (host-name) gets " (<subseason>)" appended
             so each instance's Xbox session is distinguishable in the friends list.
-            It no longer selects a NetherNet shard: Geyser publishes a single ingress, and every
-            instance discovers that same id. Leave at 0 for a normal single-server setup.""")
+            Leave at 0 for a normal single-server setup.""")
         @DefaultNumeric(0)
         @NumericRange(from = 0, to = Integer.MAX_VALUE)
         int subseason();

@@ -76,7 +76,7 @@ public final class StandaloneBridgeService {
 
     public void stop() {
         if (this.server != null) {
-            this.server.disconnect();
+            this.server.close();
             this.server = null;
         }
         this.eventLoopGroup.shutdownGracefully();

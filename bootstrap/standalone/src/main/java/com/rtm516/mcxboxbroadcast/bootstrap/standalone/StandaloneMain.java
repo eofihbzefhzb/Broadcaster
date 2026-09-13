@@ -27,9 +27,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CompletableFuture;
 
 public class StandaloneMain {
     private static final long MAX_EXTERNAL_STATUS_AGE_SECONDS = 180;
@@ -119,8 +119,7 @@ public class StandaloneMain {
         sessionInfo = new SessionInfo(config.session().sessionInfo());
         applySessionSettings(sessionInfo);
 
-        // Run the blocking wait logic asynchronously so the main thread can finish
-        // and the auth cache can be persisted successfully.
+        // Wait for Geyser off the main thread, which goes on to start the console below.
         if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
             CompletableFuture.runAsync(() -> {
                 // If it's already discovered, skip waiting
@@ -130,12 +129,12 @@ public class StandaloneMain {
 
                 if (discoveredExternalNetworkId.isBlank()) {
                     logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
-                    logger.error("Restart Velocity/Geyser once so the updated Geyser fork can start NetherNet ingress and write portal-session-status.json, then start MCXboxBroadcast again.");
+                    logger.error("Start Velocity with the Geyser fork and portal-bridge enabled so it writes portal-session-status.json, then start MCXboxBroadcast again.");
                     if (sessionManager != null) {
                         sessionManager.shutdown();
                         sessionManager = null;
                     }
-                    System.exit(1); // Exit asynchronously if failed
+                    System.exit(1);
                 } else {
                     applySessionSettings(sessionInfo);
                     continueInitialization();
@@ -345,9 +344,6 @@ public class StandaloneMain {
     }
 
     private static void applySessionSettings(SessionInfo sessionInfo) {
-        // Read from config like every other setting below. This was previously pinned to
-        // "joinable_by_friends" by a REQUIRED_JOINABILITY constant, which silently overrode
-        // whatever the config asked for.
         String joinability = config.xboxSession().joinability();
         sessionInfo.setJoinability(joinability == null || joinability.isBlank()
             ? "joinable_by_friends"
@@ -508,8 +504,7 @@ public class StandaloneMain {
     }
 
     /**
-     * There is a single NetherNet id to discover. This used to select one shard out of
-     * several here; Geyser publishes one ingress now, so both branches did the same thing.
+     * Reads the NetherNet id Geyser publishes in portal-session-status.json, or an empty string.
      */
     private static String discoverStatusNetworkId() {
         for (String candidate : getStatusFileCandidates()) {
@@ -521,7 +516,7 @@ public class StandaloneMain {
 
                 JsonObject root = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
                 if (!isReadyStatus(root)) {
-                    logger.warn("Geyser NetherNet status is not ready in " + path);
+                    logger.debug("Geyser NetherNet status is not ready in " + path);
                     continue;
                 }
                 if (root.has("netherNetId") && !root.get("netherNetId").isJsonNull()) {
@@ -562,5 +557,4 @@ public class StandaloneMain {
             return false;
         }
     }
-
 }

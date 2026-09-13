@@ -157,32 +157,6 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
-     * Ensure the primary session AND all configured sub-sessions are authenticated
-     * and their cache files are fully refreshed BEFORE waiting for Geyser's NetherNet ID.
-     */
-    @Override
-    public void ensureAuthenticated() {
-        super.ensureAuthenticated();
-        try {
-            String subSessionsJson = storageManager().subSessions();
-            if (!subSessionsJson.isBlank()) {
-                List<String> subSessions = Arrays.asList(Constants.GSON.fromJson(subSessionsJson, String[].class));
-                for (int i = 0; i < subSessions.size(); i++) {
-                    String subSession = subSessions.get(i);
-                    logger.debug("Refreshing Xbox authentication for sub-session " + subSession + "...");
-                    SubSessionManager subManager = new SubSessionManager(subSession, this, storageManager().subSession(subSession), notificationManager(), logger);
-                    subManager.ensureAuthenticated();
-                    logger.debug("Sub-session " + subSession + " authentication is ready.");
-                }
-            }
-        } catch (IOException e) {
-            // No sub-sessions are configured
-        } catch (Exception e) {
-            logger.error("Failed to pre-authenticate sub-sessions", e);
-        }
-    }
-
-    /**
      * Initialize the session manager with the given session information
      *
      * @param sessionInfo      The session information to use
@@ -251,7 +225,6 @@ public class SessionManager extends SessionManagerCore {
         // Don't do anything as we are the main session
         return false;
     }
-
 
     /**
      * Update the current session with new information
@@ -769,9 +742,8 @@ public class SessionManager extends SessionManagerCore {
                 }
 
                 if (changed || always) {
-                    // Sent directly instead of through updateSessionInternal(), which saves every
-                    // response as currentSessionResponse.json: the snapshot would then describe a
-                    // session the server no longer advertises.
+                    // Sent directly instead of through updateSessionInternal(): its retries can sleep
+                    // for up to 30 seconds, and this runs under retiredSessionLock with a bounded timeout.
                     String body = Constants.GSON.toJson(new CreateSessionRequest(sessionInfo, retired.nonces));
                     HttpResponse<String> write = httpClient.send(HttpRequest.newBuilder()
                         .uri(URI.create(Constants.CREATE_SESSION.formatted(retired.id)))
@@ -943,16 +915,13 @@ public class SessionManager extends SessionManagerCore {
      * Lets one session rotation through and turns away anything that arrives during the
      * cooldown, returning true only to the caller that wins the slot.
      * <p>
-     * The member cap check that calls this sits in updateSession(), which runs from the scheduled
-     * update, the RTA websocket thread and the nonce refresh. A restart does not empty the member
-     * list instantly, so without this every one of those paths sees the session still over the cap
-     * and asks for another restart. On a busy session that produced a storm: several
-     * SessionManagers starting at once, one tearing down the scheduled thread pool while another
-     * was still submitting to it, and the resulting RejectedExecutionException and "RTA Websocket
-     * [null] disconnected before connectionId was received" left the session dead until the process
-     * was restarted by hand. Members joining stopped being tracked or published from then on.
+     * The member cap check that calls this runs on every session update, and updates come from
+     * several threads. Without it each of them sees the session over the cap and starts its own
+     * rotation - and when a rotation fails, for instance on an Xbox 429, every update retries it
+     * immediately. The full restart this replaced turned exactly that into a storm that left the
+     * session dead until the process was restarted by hand.
      * <p>
-     * A timestamp rather than a one-shot flag because a restart can fail, and a session stuck at
+     * A timestamp rather than a one-shot flag because a rotation can fail, and a session stuck at
      * the cap with no way to retry would be just as broken. Compare-and-set rather than a plain
      * read and write because the callers are concurrent threads.
      */
