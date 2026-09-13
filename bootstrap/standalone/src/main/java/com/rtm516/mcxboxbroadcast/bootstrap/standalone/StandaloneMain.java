@@ -508,7 +508,7 @@ public class StandaloneMain {
     }
 
     /**
-     * There is a single NetherNet id to discover. The subseason used to select one shard out of
+     * There is a single NetherNet id to discover. This used to select one shard out of
      * several here; Geyser publishes one ingress now, so both branches did the same thing.
      */
     private static String discoverStatusNetworkId() {

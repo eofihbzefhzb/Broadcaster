@@ -109,9 +109,9 @@ friend-sync:
     enabled: false
 ```
 
-Startup order does not matter. Geyser retries its NetherNet bind every 10 seconds
-until the Xbox auth source is usable and waits up to 60 seconds for the cache file
-to appear; the publisher in turn waits for a ready `portal-session-status.json`
+Startup order does not matter. Geyser waits up to 60 seconds for the cache file
+to appear and retries its NetherNet bind in the background (every 10 seconds at
+first, backing off to once a minute) until the Xbox auth source is usable; the publisher in turn waits for a ready `portal-session-status.json`
 before publishing. Whichever starts first waits for the other. No ID copying is
 required.
 
