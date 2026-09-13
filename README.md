@@ -130,7 +130,8 @@ so every player in the session opens it to the people they follow.
 
 A session holds 30 members. At 28 the publisher moves its accounts to a fresh session and
 keeps hosting the previous one until its last player leaves, so the friends of the players
-still in it can go on joining.
+still in it can go on joining. Only one previous session is kept: it is dropped when the next
+rotation replaces it, after 12 hours, or when the publisher restarts.
 
 Nothing widens the audience beyond that. Both obvious attempts were tried:
 
@@ -168,7 +169,9 @@ Velocity log, in order (without it only the last line is printed):
 [proxy-bridge] NetherNet signal sent / received
 [proxy-bridge] NetherNet Bedrock session initialized
 [proxy-bridge] Bedrock authentication completed for <player>
-[proxy-bridge] Floodgate authentication completed
+[proxy-bridge] resource pack info sent to <player>
+[proxy-bridge] resource pack response from <player>: status=COMPLETED
+[proxy-bridge] Floodgate authentication completed for <player>
 [proxy-bridge] <player> joined over NetherNet from <address>
 ```
 
@@ -177,8 +180,9 @@ If a join fails, classify the last stage that was logged:
 - no offer: session publication, account visibility, or Xbox signaling
 - offer and signals but no Bedrock session: NAT/ICE or NetherNet transport failure
 - Bedrock session but no authentication: Bedrock protocol or Xbox login failure
-- authentication but no Floodgate line: Floodgate key setup
-- Floodgate but no "joined over NetherNet": Java/Paper connection failure
+- resource pack info but no `status=COMPLETED`: the player quit at the resource pack prompt,
+  or refused a pack that `force-resource-packs` makes mandatory
+- Floodgate but no "joined over NetherNet": Floodgate key or Java/Paper connection failure
 
 The client message “NetherNet” or “Door” is only a generic symptom; the
 server-side stage is the useful diagnosis.
