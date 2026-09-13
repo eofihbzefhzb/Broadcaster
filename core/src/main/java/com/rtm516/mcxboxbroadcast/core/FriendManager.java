@@ -305,7 +305,7 @@ public class FriendManager {
                         }
                     }
                 } catch (Exception e) {
-                    logger.error("Failed to sync friends", e);
+                    logger.debug("Failed to sync friends: " + e);
                 }
             }, friendSyncConfig.updateInterval(), friendSyncConfig.updateInterval(), TimeUnit.SECONDS);
         }
