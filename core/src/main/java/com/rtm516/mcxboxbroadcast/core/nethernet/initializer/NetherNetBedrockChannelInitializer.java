@@ -19,6 +19,8 @@ public abstract class NetherNetBedrockChannelInitializer<T extends BedrockSessio
 
     @Override
     protected final void initChannel(Channel channel) throws Exception {
+        this.preInitChannel(channel);
+
         channel.pipeline()
             .addLast(NetherNetPacketDecoder.NAME, new NetherNetPacketDecoder())
             .addLast(NetherNetPacketEncoder.NAME, new NetherNetPacketEncoder());
@@ -27,6 +29,9 @@ public abstract class NetherNetBedrockChannelInitializer<T extends BedrockSessio
         channel.pipeline().addLast(BedrockPeer.NAME, this.createPeer(channel));
 
         this.postInitChannel(channel);
+    }
+
+    protected void preInitChannel(Channel channel) throws Exception {
     }
 
     public static CompressionStrategy getCompression() {

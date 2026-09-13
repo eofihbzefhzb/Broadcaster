@@ -144,8 +144,9 @@ public class AuthManager {
             authManager.getXboxLiveXstsToken().getUpToDate();
             authManager.getPlayFabToken().getUpToDate();
             profileInfo.getUpToDate();
+            // Geyser's NetherNet ingress signs in with this token from cache.json; a refresh reaches
+            // the file through the change listener registered in initialise().
             authManager.getMinecraftSession().getUpToDate();
-            saveToCache();
         } catch (InformativeHttpRequestException e) {
             if (e.getMessage().contains("agecheck")) {
                 throw new AgeVerificationException("Authentication failed due to age verification requirement", e);

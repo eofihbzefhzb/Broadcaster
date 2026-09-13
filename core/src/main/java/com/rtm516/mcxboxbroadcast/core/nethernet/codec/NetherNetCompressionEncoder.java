@@ -41,6 +41,8 @@ public class NetherNetCompressionEncoder extends MessageToByteEncoder<ByteBuf> {
                 });
             }
             out.writeBytes(compressed);
+        } catch (Exception e) {
+            throw e;
         } finally {
             compressed.release();
         }
