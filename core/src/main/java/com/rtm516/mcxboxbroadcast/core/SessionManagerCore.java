@@ -22,6 +22,7 @@ import dev.kastle.webrtc.PortAllocatorConfig;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioDatagramChannel;
@@ -70,14 +71,6 @@ public abstract class SessionManagerCore {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private NetherNetXboxRpcSignaling signaling;
-    /**
-     * Native WebRTC factory backing the local NetherNet listener, when this process hosts one.
-     * <p>
-     * Held rather than passed anonymously because the channel only frees a factory it created
-     * itself - a supplied one belongs to whoever supplied it, since the peer connections opened
-     * through it outlive the server channel.
-     */
-    private PeerConnectionFactory peerConnectionFactory;
     private final Set<Channel> bridgeClientChannels = ConcurrentHashMap.newKeySet();
 
     private PortAllocatorConfig netherNetPortAllocatorConfig;
@@ -521,11 +514,8 @@ public abstract class SessionManagerCore {
                 // Re-publishing, not re-creating: createSession() below PUTs against whatever id
                 // the session currently holds, so everyone already in it stays a member - which
                 // matters, because their membership is what keeps the session visible to their
-                // friends. A dropped websocket therefore costs no reach at all.
-                //
-                // The id itself changes in exactly two places, neither of them here: restarting the
-                // process, and SessionManager#rotateSession when the session fills to its member
-                // cap. Both deliberately mint a new id to get an empty session.
+                // friends. A dropped websocket therefore costs no reach at all. The id only changes
+                // in SessionManager#rotateSession, when the session fills to its member cap.
                 logger.warn("Connection to websocket lost, re-publishing the Xbox session...");
                 logger.debug("WebSocket status: RTA Open: " + rtaIsOpen + ", RTC Open: " + rtcIsOpen + ", Signaling: " + signalingIsOpen);
 
@@ -622,7 +612,7 @@ public abstract class SessionManagerCore {
         try {
             ServerBootstrap b = new ServerBootstrap();
             b.group(bossGroup, workerGroup)
-                .channelFactory(NetherNetChannelFactory.server(this.peerConnectionFactory = new PeerConnectionFactory(), signaling))
+                .channelFactory(NetherNetChannelFactory.server(new PeerConnectionFactory(), signaling))
                 .childHandler(new BroadcasterChannelInitializer(this, logger));
 
             PortAllocatorConfig portAllocatorConfig = netherNetPortAllocatorConfig();
@@ -653,7 +643,9 @@ public abstract class SessionManagerCore {
             ? sessionInfo.getRelayTargetPort()
             : sessionInfo.getPort();
 
-        Channel channel = new Bootstrap()
+        // Not awaited: this runs on a NetherNet peer's event loop, and the new channel can land on
+        // that same loop, where blocking on its connect would throw instead of waiting.
+        ChannelFuture connectFuture = new Bootstrap()
             .group(this.workerGroup)
             .channelFactory(RakChannelFactory.client(NioDatagramChannel.class))
             .option(RakChannelOption.RAK_PROTOCOL_VERSION, Constants.BEDROCK_CODEC.getRaknetProtocolVersion())
@@ -668,10 +660,14 @@ public abstract class SessionManagerCore {
                     sessionConsumer.accept(session);
                 }
             })
-            .connect(new InetSocketAddress(host, port))
-            .awaitUninterruptibly()
-            .channel();
+            .connect(new InetSocketAddress(host, port));
+        connectFuture.addListener(future -> {
+            if (!future.isSuccess()) {
+                logger.warn("Could not connect the bridge to " + host + ":" + port + ": " + future.cause());
+            }
+        });
 
+        Channel channel = connectFuture.channel();
         this.bridgeClientChannels.add(channel);
         // Drop it again when it closes. Without this the set only ever grew: one dead Channel kept
         // alive per player who has ever joined through the local bridge, until the process stops.
@@ -711,16 +707,6 @@ public abstract class SessionManagerCore {
         if (workerGroup != null) {
             workerGroup.shutdownGracefully();
             workerGroup = null;
-        }
-        if (peerConnectionFactory != null) {
-            // Last, and only once the channel and its groups are down: freeing the native handle
-            // while a peer connection still runs on it is a use-after-free, not an exception.
-            try {
-                peerConnectionFactory.dispose();
-            } catch (NullPointerException ignored) {
-                // The native handle was never fully initialised.
-            }
-            peerConnectionFactory = null;
         }
     }
 

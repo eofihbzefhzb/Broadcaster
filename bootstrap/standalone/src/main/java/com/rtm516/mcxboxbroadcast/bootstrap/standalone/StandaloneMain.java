@@ -42,7 +42,7 @@ public class StandaloneMain {
     private static String discoveredExternalNetworkId;
 
     // Remembers the last network id that was logged, so the discovery loop reports a given id once
-    private static String lastLoggedPrimaryNetworkId = null;
+    private static String lastLoggedNetworkId = null;
 
     public static SessionManager sessionManager;
 
@@ -61,7 +61,7 @@ public class StandaloneMain {
             }
         }
 
-        // 2. Check for a JVM argument: java -Dgeyser.status.file="/path/to/file.json" -jar Broadcaster.jar
+        // 2. Check for a JVM argument: java -Dgeyser.status.file="/path/to/file.json" -jar MCXboxBroadcastStandalone.jar
         String sysProp = System.getProperty("geyser.status.file");
         if (sysProp != null && !sysProp.isBlank()) {
             candidates.add(sysProp);
@@ -120,12 +120,9 @@ public class StandaloneMain {
         applySessionSettings(sessionInfo);
 
         // Wait for Geyser off the main thread, which goes on to start the console below.
-        if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
+        if (config.enabled() && config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
             CompletableFuture.runAsync(() -> {
-                // If it's already discovered, skip waiting
-                if (discoveredExternalNetworkId.isBlank()) {
-                    discoveredExternalNetworkId = waitForExternalNetworkId();
-                }
+                discoveredExternalNetworkId = waitForExternalNetworkId();
 
                 if (discoveredExternalNetworkId.isBlank()) {
                     logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
@@ -157,18 +154,7 @@ public class StandaloneMain {
             // before start() so a failed bind still frees the group it already allocated.
             StandaloneBridgeService serviceToStop = bridgeService;
             Runtime.getRuntime().addShutdownHook(new Thread(serviceToStop::stop, "MCXboxBroadcast-bridge-shutdown"));
-            try {
-                bridgeService.start();
-            } catch (IllegalStateException exception) {
-                String fallbackNetworkId = discoverExternalNetworkId();
-                if (!fallbackNetworkId.isBlank()) {
-                    discoveredExternalNetworkId = fallbackNetworkId;
-                    applySessionSettings(sessionInfo);
-                    logger.warn("UDP " + config.bridge().listenPort() + " is already in use. Switching to external-hosted NetherNet publish mode using network ID " + discoveredExternalNetworkId + ".");
-                } else {
-                    throw exception;
-                }
-            }
+            bridgeService.start();
         }
 
         if (config.enabled()) {
@@ -185,7 +171,7 @@ public class StandaloneMain {
             try {
                 createSession();
             } catch (Exception e) {
-                logger.error("Failed to create session asynchronously", e);
+                logger.error("Failed to create session", e);
             }
         } else {
             logger.info("Xbox session publishing is disabled in config.yml");
@@ -358,12 +344,10 @@ public class StandaloneMain {
         sessionInfo.setExternalNetherNetHosted(isExternalNetherNetEnabled());
         sessionInfo.setExternalNetherNetId(effectiveExternalNetworkId());
         if (isLocalBridgeEnabled()) {
-            sessionInfo.setProxyBridgeEnabled(true);
             sessionInfo.setRelayTargetAddress(config.bridge().backendAddress());
             sessionInfo.setRelayTargetPort(config.bridge().backendPort());
             sessionInfo.setPort(config.bridge().listenPort());
         } else {
-            sessionInfo.setProxyBridgeEnabled(false);
             sessionInfo.setRelayTargetAddress(null);
             sessionInfo.setRelayTargetPort(0);
         }
@@ -388,47 +372,28 @@ public class StandaloneMain {
     }
 
     private static void logMode() {
-        boolean bridgeEnabled = isLocalBridgeEnabled();
-        boolean publishEnabled = config.enabled();
-        boolean externalNetherNet = isExternalNetherNetEnabled();
-        boolean waitingForExternalNetherNet = config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank();
-
-        if (waitingForExternalNetherNet) {
-            logger.info("Mode: PUBLISH + EXTERNAL NETHERNET (WAITING)");
-            logger.info("Geyser-backed mode is selected, but the NetherNet network ID has not been discovered yet.");
+        if (!config.enabled()) {
+            // continueInitialization() says so itself.
             return;
         }
 
-        if (bridgeEnabled && publishEnabled) {
-            logger.info("Mode: BRIDGE + PUBLISH");
-            logger.info("Bedrock joins terminate at this proxy and relay to " + config.bridge().backendAddress() + ":" + config.bridge().backendPort());
-            logger.info("Xbox Live session publishing is enabled for the proxy endpoint " + config.session().sessionInfo().ip() + ":" + config.bridge().listenPort());
-            return;
-        }
-
-        if (bridgeEnabled) {
-            logger.info("Mode: BRIDGE");
-            logger.info("Bedrock joins terminate at this proxy and relay to " + config.bridge().backendAddress() + ":" + config.bridge().backendPort());
-            return;
-        }
-
-        if (publishEnabled && externalNetherNet) {
+        if (isExternalNetherNetEnabled()) {
             logger.info("Mode: PUBLISH + EXTERNAL NETHERNET");
             logger.info("Xbox Live session publishing is enabled for externally hosted NetherNet ID " + effectiveExternalNetworkId());
             return;
         }
 
-        if (publishEnabled) {
-            logger.info("Mode: PUBLISH");
-            logger.info("Xbox Live session publishing is enabled without a Bedrock relay proxy.");
-            return;
-        }
-
-        logger.info("Mode: DISABLED");
+        logger.info("Mode: BRIDGE + PUBLISH");
+        logger.info("Bedrock joins terminate at this proxy and relay to " + config.bridge().backendAddress() + ":" + config.bridge().backendPort());
+        logger.info("Xbox Live session publishing is enabled for the proxy endpoint " + config.session().sessionInfo().ip() + ":" + config.bridge().listenPort());
     }
 
+    /**
+     * The local bridge relays joins through this process, which needs the session manager's NetherNet
+     * listener - so it only runs while publishing is enabled and Geyser is not hosting the ingress.
+     */
     private static boolean isLocalBridgeEnabled() {
-        return !isExternalNetherNetEnabled();
+        return config.enabled() && !isExternalNetherNetEnabled();
     }
 
     private static boolean isExternalNetherNetEnabled() {
@@ -523,9 +488,9 @@ public class StandaloneMain {
                     String networkId = root.get("netherNetId").getAsString().replaceAll("[^0-9]", "");
                     if (!networkId.isBlank()) {
                         // Info only when the id changes; this runs on every discovery and update pass
-                        if (!networkId.equals(lastLoggedPrimaryNetworkId)) {
+                        if (!networkId.equals(lastLoggedNetworkId)) {
                             logger.info("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
-                            lastLoggedPrimaryNetworkId = networkId;
+                            lastLoggedNetworkId = networkId;
                         } else {
                             logger.debug("Discovered local Geyser NetherNet ID " + networkId + " from " + path);
                         }

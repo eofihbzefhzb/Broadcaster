@@ -10,7 +10,7 @@ import org.spongepowered.configurate.objectmapping.meta.Comment;
 
 @ConfigSerializable
 public interface CoreConfig {
-    @Comment("Enable MCXboxBroadcast")
+    @Comment("Whether to publish the Xbox session. When off, nothing is published and the local bridge does not start")
     @DefaultBoolean(true)
     boolean enabled();
 
@@ -21,7 +21,6 @@ public interface CoreConfig {
     XboxSessionConfig xboxSession();
 
     @Comment("Standalone plain-Bedrock proxy bridge settings")
-    @ExcludePlatform(platforms = {"Extension"})
     BridgeConfig bridge();
 
     @Comment("Advanced NetherNet publishing settings")
@@ -227,7 +226,7 @@ public interface CoreConfig {
     interface BridgeConfig {
         @Comment("""
             Standalone Bedrock bridge settings.
-            The bridge starts automatically unless nether-net.external-hosted is true.
+            The bridge starts automatically while publishing is enabled and nether-net.external-hosted is false.
 
             The local address to bind the proxy listener to""")
         @DefaultString("0.0.0.0")
@@ -281,8 +280,8 @@ public interface CoreConfig {
 
         @Comment("""
             How long standalone mode should wait for the local Geyser portal bridge to publish its
-            automatically generated NetherNet ID when external-network-id is empty.
-            This makes it safe to start MCXboxBroadcast before Velocity/Geyser.""")
+            automatically generated NetherNet ID when external-network-id is empty. MCXboxBroadcast
+            can start first as long as Geyser is ready within this time; otherwise it exits.""")
         @DefaultNumeric(120)
         @NumericRange(from = 0, to = Integer.MAX_VALUE)
         int discoveryTimeoutSeconds();

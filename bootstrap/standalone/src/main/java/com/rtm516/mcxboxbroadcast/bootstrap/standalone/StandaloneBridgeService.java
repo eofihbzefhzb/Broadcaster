@@ -55,7 +55,7 @@ public final class StandaloneBridgeService {
 
                 @Override
                 protected void initSession(NetherNetBridgeServerSession session) {
-                    // Standalone mode relays over RakNet, which negotiates SNAPPY
+                    // Plain Bedrock clients reach this listener over RakNet, so offer them SNAPPY
                     session.setPacketHandler(new BridgeUpstreamPacketHandler(session, StandaloneMain.sessionManager, logger, PacketCompressionAlgorithm.SNAPPY));
                 }
             })
@@ -92,8 +92,8 @@ public final class StandaloneBridgeService {
 
     private BedrockPong createAdvertisement(int port) {
         SessionInfo sessionInfo = this.sessionInfoSupplier.get();
-        // Built when the bridge starts, which can be before a gamertag is known or with publishing
-        // turned off entirely, so the names may still be empty; an empty MOTD shows as a blank server.
+        // Built when the bridge starts, which can be before a gamertag is known, so the names may
+        // still be empty; an empty MOTD shows as a blank server.
         String hostName = sessionInfo.getHostName().isEmpty() ? "MCXboxBroadcast" : sessionInfo.getHostName();
         String worldName = sessionInfo.getWorldName().isEmpty() ? hostName : sessionInfo.getWorldName();
         return new BedrockPong()

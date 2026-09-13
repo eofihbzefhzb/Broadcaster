@@ -29,7 +29,6 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
 
     private JSONObject skinData;
     private ChainValidationResult chain;
-    private String clientJwt;
 
     public BridgeUpstreamPacketHandler(NetherNetBridgeServerSession session, SessionManagerCore sessionManager, Logger logger, PacketCompressionAlgorithm compressionAlgorithm) {
         this.session = session;
@@ -82,7 +81,7 @@ public final class BridgeUpstreamPacketHandler implements BedrockPacketHandler {
                 session.disconnect("disconnectionScreen.notAuthenticated");
                 return PacketSignal.HANDLED;
             }
-            clientJwt = packet.getClientJwt();
+            String clientJwt = packet.getClientJwt();
 
             ECPublicKey identityPublicKey = (ECPublicKey) chain.identityClaims().parsedIdentityPublicKey();
             // verifyClientData() reports a bad signature by returning null, not by throwing, so its

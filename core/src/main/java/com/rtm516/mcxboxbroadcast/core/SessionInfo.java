@@ -26,7 +26,6 @@ public class SessionInfo {
     private boolean lanGame = true;
     private boolean editorWorld;
     private boolean hardcore;
-    private boolean proxyBridgeEnabled;
     private String relayTargetAddress;
     private int relayTargetPort;
     private boolean externalNetherNetHosted;
@@ -165,13 +164,6 @@ public class SessionInfo {
         this.hardcore = hardcore;
     }
 
-    public boolean isProxyBridgeEnabled() {
-        return proxyBridgeEnabled;
-    }
-
-    public void setProxyBridgeEnabled(boolean proxyBridgeEnabled) {
-        this.proxyBridgeEnabled = proxyBridgeEnabled;
-    }
 
     public String getRelayTargetAddress() {
         return relayTargetAddress;
@@ -231,7 +223,6 @@ public class SessionInfo {
         copy.setLanGame(lanGame);
         copy.setEditorWorld(editorWorld);
         copy.setHardcore(hardcore);
-        copy.setProxyBridgeEnabled(proxyBridgeEnabled);
         copy.setRelayTargetAddress(relayTargetAddress);
         copy.setRelayTargetPort(relayTargetPort);
         copy.setExternalNetherNetHosted(externalNetherNetHosted);

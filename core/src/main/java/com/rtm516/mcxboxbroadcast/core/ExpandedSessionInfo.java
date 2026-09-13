@@ -23,9 +23,7 @@ public class ExpandedSessionInfo extends SessionInfo {
         this.rakNetGUID = "";
 
         this.sessionId = UUID.randomUUID().toString();
-        this.netherNetId = sessionInfo.isExternalNetherNetHosted() && sessionInfo.getExternalNetherNetId() != null && !sessionInfo.getExternalNetherNetId().isBlank()
-            ? new BigInteger(sessionInfo.getExternalNetherNetId())
-            : BigInteger.valueOf(Math.abs(RANDOM.nextLong()));
+        this.netherNetId = BigInteger.valueOf(Math.abs(RANDOM.nextLong()));
         this.deviceId = UUID.randomUUID().toString();
         this.pmsgId = null;
 
@@ -35,19 +33,7 @@ public class ExpandedSessionInfo extends SessionInfo {
         setMaxPlayers(sessionInfo.getMaxPlayers());
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
-        setJoinability(sessionInfo.getJoinability());
-        setReadRestriction(sessionInfo.getReadRestriction());
-        setJoinRestriction(sessionInfo.getJoinRestriction());
-        setWorldType(sessionInfo.getWorldType());
-        setBroadcastSetting(sessionInfo.getBroadcastSetting());
-        setLanGame(sessionInfo.isLanGame());
-        setEditorWorld(sessionInfo.isEditorWorld());
-        setHardcore(sessionInfo.isHardcore());
-        setProxyBridgeEnabled(sessionInfo.isProxyBridgeEnabled());
-        setRelayTargetAddress(sessionInfo.getRelayTargetAddress());
-        setRelayTargetPort(sessionInfo.getRelayTargetPort());
-        setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
-        setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
+        copyPublishingSettings(sessionInfo);
     }
 
     public void updateSessionInfo(SessionInfo sessionInfo) {
@@ -57,6 +43,15 @@ public class ExpandedSessionInfo extends SessionInfo {
         setMaxPlayers(sessionInfo.getMaxPlayers());
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
+        copyPublishingSettings(sessionInfo);
+    }
+
+    /**
+     * Copies the configured Xbox session settings and, in external-hosted mode, adopts the NetherNet
+     * id Geyser listens on. netherNetId is what the session advertises under SupportedConnections, so
+     * it has to follow an id discovered at runtime too, not only the one known at construction.
+     */
+    private void copyPublishingSettings(SessionInfo sessionInfo) {
         setJoinability(sessionInfo.getJoinability());
         setReadRestriction(sessionInfo.getReadRestriction());
         setJoinRestriction(sessionInfo.getJoinRestriction());
@@ -65,17 +60,11 @@ public class ExpandedSessionInfo extends SessionInfo {
         setLanGame(sessionInfo.isLanGame());
         setEditorWorld(sessionInfo.isEditorWorld());
         setHardcore(sessionInfo.isHardcore());
-        setProxyBridgeEnabled(sessionInfo.isProxyBridgeEnabled());
         setRelayTargetAddress(sessionInfo.getRelayTargetAddress());
         setRelayTargetPort(sessionInfo.getRelayTargetPort());
         setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
 
-        // netherNetId is what the session advertises under SupportedConnections, and the external id
-        // above is only the value it is derived from. The constructor derives it once; without doing
-        // it again here, a new id discovered from Geyser at runtime was logged as "Updated external
-        // NetherNet ID" and copied into externalNetherNetId while the session went on advertising the
-        // old one, leaving every join searching for a listener that no longer existed.
         if (sessionInfo.isExternalNetherNetHosted()
             && sessionInfo.getExternalNetherNetId() != null
             && !sessionInfo.getExternalNetherNetId().isBlank()) {
