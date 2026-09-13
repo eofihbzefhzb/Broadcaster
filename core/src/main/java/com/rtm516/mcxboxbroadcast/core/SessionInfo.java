@@ -164,7 +164,6 @@ public class SessionInfo {
         this.hardcore = hardcore;
     }
 
-
     public String getRelayTargetAddress() {
         return relayTargetAddress;
     }
