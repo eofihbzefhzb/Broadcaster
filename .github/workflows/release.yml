@@ -30,10 +30,10 @@ jobs:
     - name: Validate Gradle Wrapper
       uses: gradle/actions/wrapper-validation@v5
 
-    - name: Set up JDK 25
+    - name: Set up JDK 17
       uses: actions/setup-java@v5
       with:
-        java-version: 25
+        java-version: 17
         distribution: temurin
 
     - name: Get previous build number
@@ -77,9 +77,7 @@ jobs:
 
     - name: Generate release diff
       if: ${{ success() && github.ref_name == 'master' }}
-      # Only what is new since the previous build. "git log -n 50" listed the last fifty commits
-      # no matter what had already been published, so every release repeated the entries of the
-      # ones before it and the notes grew without ever dropping anything.
+      # Only the commits since the previous build's tag, so a release never repeats earlier notes.
       env:
         PREVIOUS_BUILD: ${{ steps.getPreviousBuild.outputs.result }}
       run: |

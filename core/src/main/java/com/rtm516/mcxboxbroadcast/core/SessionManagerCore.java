@@ -18,8 +18,8 @@ import dev.kastle.netty.channel.nethernet.NetherNetChannelFactory;
 import dev.kastle.netty.channel.nethernet.config.NetherChannelOption;
 import dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling;
 import dev.kastle.webrtc.PeerConnectionFactory;
-import io.netty.bootstrap.Bootstrap;
 import dev.kastle.webrtc.PortAllocatorConfig;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -51,7 +51,6 @@ import java.util.function.Consumer;
  * Simple manager to authenticate and create sessions on Xbox
  */
 public abstract class SessionManagerCore {
-
     private final AuthManager authManager;
     private final FriendManager friendManager;
     protected final HttpClient httpClient;
@@ -66,7 +65,6 @@ public abstract class SessionManagerCore {
     protected String lastSessionResponse;
 
     protected boolean initialized = false;
-
 
     private Channel netherNetChannel;
     private EventLoopGroup bossGroup;
@@ -193,7 +191,7 @@ public abstract class SessionManagerCore {
 
         // Make sure we are logged in and get info
         try {
-            getAuthManager();
+            BedrockAuthManager manager = getAuthManager();
         } catch (AgeVerificationException e) {
             logger.error("Authentication failed due to the account requiring age verification. Please login to xbox.com and complete the age verification process, then try again.");
             logger.error("You can skip it/opt out and continue using the tool, but some features may not work correctly.");
@@ -201,7 +199,12 @@ public abstract class SessionManagerCore {
             return;
         }
 
-        logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ")");
+        int friendCount = -1;
+        try {
+            friendCount = friendManager.get().size();
+        } catch (Exception ignored) {}
+
+        logger.info("Successfully authenticated as " + getGamertag() + " (" + getXuid() + ") with " + friendCount + "/" + Constants.MAX_FRIENDS + " friends");
 
         if (handleFriendship()) {
             logger.info("Waiting for friendship to be processed...");
@@ -242,7 +245,6 @@ public abstract class SessionManagerCore {
      * @return True if the friendship is being handled, false otherwise
      */
     protected abstract boolean handleFriendship();
-
 
     /**
      * Setup a new session and its prerequisites
@@ -453,14 +455,6 @@ public abstract class SessionManagerCore {
             }
 
             if (createSessionResponse.statusCode() == 200 || createSessionResponse.statusCode() == 201) {
-                // Keep a live, sanitized-by-construction copy of the Xbox session
-                // response, for checking what is actually published (and dumpsession);
-                // it contains the API response only and never request headers/tokens.
-                try {
-                    storageManager.currentSessionResponse(createSessionResponse.body());
-                } catch (IOException exception) {
-                    logger.warn("Xbox session updated, but the live session snapshot could not be saved: " + exception.getMessage());
-                }
                 return createSessionResponse.body();
             }
 
