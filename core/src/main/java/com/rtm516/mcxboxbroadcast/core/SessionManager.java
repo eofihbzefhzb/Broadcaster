@@ -41,10 +41,16 @@ public class SessionManager extends SessionManagerCore {
     private final Map<String, SubSessionManager> subSessionManagers;
 
     /** Long enough for a rotation to finish and the new session's member list to settle. */
-    private static final long RESTART_COOLDOWN_MS = 60_000L;
+    private static final long ROTATION_COOLDOWN_MS = 60_000L;
 
-    /** When the last session rotation was claimed; see claimRestartSlot(). */
-    private final AtomicLong lastRestartAttempt = new AtomicLong(0L);
+    /** Bounds every request made for the previous session, since they run under a lock. */
+    private static final Duration RETIRED_SESSION_REQUEST_TIMEOUT = Duration.ofSeconds(15);
+
+    /** A backstop, not the normal way out: a retired session is dropped as soon as it has no players. */
+    private static final Duration RETIRED_SESSION_MAX_AGE = Duration.ofHours(12);
+
+    /** When the last session rotation was claimed; see claimRotationSlot(). */
+    private final AtomicLong lastRotationAttempt = new AtomicLong(0L);
 
     /**
      * The session the primary rotated away from, still hosted for the players left in it; null when
@@ -52,7 +58,7 @@ public class SessionManager extends SessionManagerCore {
      * <p>
      * Only one is ever kept. The one just left is where nearly everyone still playing is, and every
      * hosted session costs a read on each membership change plus one per update cycle - the same Xbox
-     * limits that answered the member-cap restart storm with a 429 are the ones this would run into
+     * limits that answered the old member-cap restart storm with a 429 are the ones this would run into
      * if it held on to every session since startup.
      */
     private final AtomicReference<RetiredSession> retiredSession = new AtomicReference<>();
@@ -71,12 +77,6 @@ public class SessionManager extends SessionManagerCore {
 
     /** Whether the queued run must PUT even without a nonce change. */
     private final AtomicBoolean retiredMaintenanceForced = new AtomicBoolean();
-
-    /** Bounds every request made for the previous session, since they run under a lock. */
-    private static final Duration RETIRED_SESSION_REQUEST_TIMEOUT = Duration.ofSeconds(15);
-
-    /** A backstop, not the normal way out: a retired session is dropped as soon as it has no players. */
-    private static final Duration RETIRED_SESSION_MAX_AGE = Duration.ofHours(12);
 
     /** The id of the primary session as last published on Xbox; see publishedSessionId(). */
     private volatile String publishedSessionId;
@@ -256,7 +256,7 @@ public class SessionManager extends SessionManagerCore {
      * endpoints with one request per sub-account each time.
      * <p>
      * Each refresh is dispatched to the scheduled pool instead of running inline. A refresh can block
-     * on an HTTP retry chain of up to ~30 seconds, and running several of those in series would delay
+     * on HTTP retries for tens of seconds, and running several of those in series would delay
      * the primary session's own update loop.
      */
     private void refreshSubSessions() {
@@ -342,7 +342,7 @@ public class SessionManager extends SessionManagerCore {
 
             // Rotate onto a fresh session once we reach 28 of the 30 member cap
             int players = sessionResponse.members().size();
-            if (players >= 28 && claimRestartSlot()) {
+            if (players >= 28 && claimRotationSlot()) {
                 logger.info("Rotating session due to " + players + "/30 players");
                 rotateSession();
             }
@@ -389,11 +389,6 @@ public class SessionManager extends SessionManagerCore {
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
             if (!current.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
-                // Measured at a few seconds behind the real disconnect now that this also runs on
-                // Xbox's push events, but it is still Xbox's view rather than the game's: a peer
-                // that vanishes without telling Xbox is only dropped when Xbox notices. The proxy
-                // log holds the authoritative timing; what this line marks is the moment their
-                // follower list stops being a way in.
                 logger.info(entry.getValue() + " is no longer in the Xbox session (" + current.size() + " members)");
             }
         }
@@ -405,8 +400,8 @@ public class SessionManager extends SessionManagerCore {
      * Whether this xuid is one of our own publishing accounts.
      * <p>
      * The sub-accounts register one after another over the first minute, so they all land after the
-     * first snapshot and were announced as arrivals - six lines of noise per startup that say
-     * nothing, and that bury the real players among them. They are still counted in the member
+     * first snapshot and were announced as arrivals - a line of noise per sub-account on every
+     * startup, burying the real players among them. They are still counted in the member
      * total, because each of them genuinely holds a door open.
      */
     private boolean isOwnAccount(String xuid) {
@@ -553,9 +548,9 @@ public class SessionManager extends SessionManagerCore {
      * <p>
      * This replaces the full restart() the member cap used to trigger. A restart tears down this
      * manager, every sub-session and the shared thread pool, then builds all of them again - close
-     * to thirty seconds during which not one of the six accounts advertises the server, so nobody
-     * can find it. Since only the primary session ever accumulates members, throwing away the five
-     * sub-sessions to clear the primary's member list bought nothing and closed every door at once.
+     * to thirty seconds during which no account advertises the server, so nobody can find it. Since
+     * only the primary session ever accumulates members, throwing away every sub-session to clear
+     * the primary's member list bought nothing and closed every door at once.
      * <p>
      * createSession() is the same call the device-token refresh already makes to republish in
      * place, so this path is well travelled. It swaps the RTA websocket (setupRtaWebsocket closes
@@ -565,8 +560,8 @@ public class SessionManager extends SessionManagerCore {
      * activity handle, and that handle names a session id: it is created once, in createSession(),
      * with whatever id the primary held at that moment. Their membership follows the primary on its
      * own, because SubSessionManager#updateSession reads publishedSessionId() on every refresh, but
-     * the handle does not - left alone, five of the six doors would keep leading to the old session,
-     * which is the full one, until each account's websocket happened to drop. See
+     * the handle does not - left alone, every sub-account's door would keep leading to the old
+     * session, which is the full one, until that account's websocket happened to drop. See
      * SubSessionManager#republish().
      * <p>
      * The previous session is not abandoned. The players still in it show it to their own friends,
@@ -619,8 +614,8 @@ public class SessionManager extends SessionManagerCore {
             // createSession() gave this account a new websocket, so its membership in the previous
             // session names a connection that no longer exists. Re-register it now rather than a
             // whole update cycle later, before Xbox marks the host inactive there. Queued ahead of
-            // the republishes below on purpose: the pool has five threads, those five tasks can each
-            // hold one for up to the websocket timeout, and this must not wait behind all of them.
+            // the republishes below on purpose: the pool has five threads, each republish can hold
+            // one for up to the websocket timeout, and this must not wait behind all of them.
             scheduleRetiredMaintenance(true);
 
             // On the pool, one task per account, as refreshSubSessions() does: each republish waits
@@ -925,10 +920,10 @@ public class SessionManager extends SessionManagerCore {
      * the cap with no way to retry would be just as broken. Compare-and-set rather than a plain
      * read and write because the callers are concurrent threads.
      */
-    private boolean claimRestartSlot() {
+    private boolean claimRotationSlot() {
         long now = System.currentTimeMillis();
-        long last = lastRestartAttempt.get();
-        return now - last >= RESTART_COOLDOWN_MS && lastRestartAttempt.compareAndSet(last, now);
+        long last = lastRotationAttempt.get();
+        return now - last >= ROTATION_COOLDOWN_MS && lastRotationAttempt.compareAndSet(last, now);
     }
 
     /**

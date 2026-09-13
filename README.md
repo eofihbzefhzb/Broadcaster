@@ -33,8 +33,8 @@ mode. Geyser owns the live NetherNet connection and Paper owns the Java game.
 ### Requirements
 
 - Java 17 or newer
-- Velocity, in front of a Paper 1.21.11 backend (or the Java version selected by the paired Geyser build)
-- ViaVersion and Floodgate installed on Velocity
+- Velocity, in front of a Paper backend on a Java version the paired Geyser build supports
+- Floodgate installed on Velocity, if Geyser uses `auth-type: floodgate`
 - The companion Geyser fork installed as `Geyser-Velocity.jar`; it is the only bootstrap that fork builds
 - An Xbox/Microsoft account that is allowed to publish the session
 - Bedrock players who can see the publisher through the Xbox friends/session UI
@@ -50,7 +50,6 @@ stack/
   plugins/
     Geyser-Velocity.jar
     floodgate-velocity.jar
-    ViaVersion.jar
   mcxbox-standalone/
     MCXboxBroadcastStandalone.jar
     config.yml
@@ -168,7 +167,7 @@ Velocity log, in order (without it only the last line is printed):
 [proxy-bridge] NetherNet offer received
 [proxy-bridge] NetherNet signal sent / received
 [proxy-bridge] NetherNet Bedrock session initialized
-[proxy-bridge] Bedrock authentication completed; Floodgate handoff ready
+[proxy-bridge] Bedrock authentication completed for <player>
 [proxy-bridge] Floodgate authentication completed
 [proxy-bridge] <player> joined over NetherNet from <address>
 ```
@@ -192,7 +191,7 @@ Recommended runtime layout:
 
 1. `MCXboxBroadcastStandalone.jar` publishes the Xbox Live session
 2. `Geyser-Velocity.jar` from the companion fork hosts the real NetherNet/Bedrock ingress
-3. Bedrock gameplay traffic terminates in Geyser, not in `mcxba`
+3. Bedrock gameplay traffic terminates in Geyser, not in MCXboxBroadcast
 
 That removes the old gameplay relay bottleneck and is the smoothest setup from this work.
 
@@ -220,7 +219,7 @@ java -jar MCXboxBroadcastStandalone.jar
 
 ## Config Note For Local Device Installs
 
-If `mcxba` and the real Geyser NetherNet ingress are on the same local device, you do not need to use your router-forwarded public Bedrock port in `config.yml`.
+If MCXboxBroadcast and the real Geyser NetherNet ingress are on the same local device, you do not need to use your router-forwarded public Bedrock port in `config.yml`.
 
 In `external-hosted` mode, the important join identifier is the NetherNet network ID. The config can stay on the local or LAN listener that actually matches your Bedrock-side host.
 

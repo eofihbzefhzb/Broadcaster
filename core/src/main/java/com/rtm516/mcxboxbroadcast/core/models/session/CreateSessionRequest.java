@@ -17,9 +17,7 @@ public class CreateSessionRequest extends JoinSessionRequest {
         //    Joinability is the relationship it demands to join.
         // Widening Joinability is not a way past the Xbox gate, and there is no "friends of
         // friends" Joinability value to widen it to - see the config comment on joinability().
-        this.properties = new SessionProperties(
-            new SessionSystemProperties(sessionInfo.getJoinRestriction(), sessionInfo.getReadRestriction(), false),
-            new SessionCustomProperties(
+        this.properties = new SessionProperties(new SessionSystemProperties(sessionInfo.getJoinRestriction(), sessionInfo.getReadRestriction(), false), new SessionCustomProperties(
             sessionInfo.getBroadcastSetting(),
             false,
             sessionInfo.getJoinability(),

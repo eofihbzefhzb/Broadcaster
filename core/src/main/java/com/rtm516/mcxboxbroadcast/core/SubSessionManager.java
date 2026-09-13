@@ -61,8 +61,7 @@ public class SubSessionManager extends SessionManagerCore {
      * <p>
      * This is what makes the whole thing work: {@code createSession()} in the base class builds the
      * "activity" handle from this value, so the sub-account's Xbox presence points at the primary
-     * session. Returning a private id here is what previously made each sub-account look like the
-     * host of its own separate world.
+     * session.
      * <p>
      * The handle reads it once, when it is created - see republish(). And it is the published id,
      * not the primary's getSessionId(), which runs ahead of Xbox during a rotation - see
@@ -241,7 +240,7 @@ public class SubSessionManager extends SessionManagerCore {
      * Registers this account as a member of the primary session.
      * <p>
      * Sends a {@link JoinSessionRequest} (a {@code members.me} block only) to the PRIMARY session id.
-     * It must not send a {@link CreateSessionRequest}: that carries the session properties - host
+     * It must not send a {@code CreateSessionRequest}: that carries the session properties - host
      * name, world, player counts, the NetherNet connection - and posting those to the primary session
      * id would have each sub-account overwrite the host's own advertisement several times a minute.
      */
