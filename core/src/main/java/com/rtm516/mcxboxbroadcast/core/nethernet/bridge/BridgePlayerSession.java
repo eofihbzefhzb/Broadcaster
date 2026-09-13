@@ -28,7 +28,6 @@ final class BridgePlayerSession {
         return identityData;
     }
 
-
     KeyPair getProxyKeyPair() {
         return proxyKeyPair;
     }
