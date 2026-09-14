@@ -1,6 +1,8 @@
 package com.rtm516.mcxboxbroadcast.core;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import com.rtm516.mcxboxbroadcast.core.configs.CoreConfig;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionCreationException;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionUpdateException;
@@ -60,8 +62,14 @@ public class SessionManager extends SessionManagerCore {
      * hosted session costs a read on each membership change plus one per update cycle - the same Xbox
      * limits that answered the old member-cap restart storm with a 429 are the ones this would run into
      * if it held on to every session since startup.
+     * <p>
+     * It survives a restart: every change is written to storage (persistRetiredSession()) and init()
+     * picks it up again (restoreRetiredSession()).
      */
     private final AtomicReference<RetiredSession> retiredSession = new AtomicReference<>();
+
+    /** Serializes persistRetiredSession() writes; separate from retiredSessionLock, which waits on Xbox. */
+    private final Object retiredSessionStoreLock = new Object();
 
     /**
      * Held by maintainRetiredSession() for its network calls, so two runs never interleave.
@@ -89,11 +97,13 @@ public class SessionManager extends SessionManagerCore {
         Map<String, String> members;
         /** Xuid -> when a player was seen arriving here; see SessionManager#memberSince. */
         final Map<String, Instant> memberSince = new HashMap<>();
-        final Instant retiredAt = Instant.now();
+        /** When the primary rotated away from it; kept across a restart, so the max age still holds. */
+        final Instant retiredAt;
 
-        RetiredSession(String id, Map<String, String> nonces) {
+        RetiredSession(String id, Map<String, String> nonces, Instant retiredAt) {
             this.id = id;
             this.nonces = nonces;
+            this.retiredAt = retiredAt;
         }
     }
 
@@ -188,6 +198,8 @@ public class SessionManager extends SessionManagerCore {
 
         // The session now exists on Xbox, so this is the id the sub-accounts started below may use.
         this.publishedSessionId = this.sessionInfo.getSessionId();
+
+        restoreRetiredSession();
 
         // Set up the auto friend sync
         this.friendSyncConfig = friendSyncConfig;
@@ -621,7 +633,8 @@ public class SessionManager extends SessionManagerCore {
             // Only now that the new session exists may the sub-accounts be sent to it.
             this.publishedSessionId = this.sessionInfo.getSessionId();
 
-            RetiredSession dropped = retiredSession.getAndSet(new RetiredSession(previous, previousNonces));
+            RetiredSession dropped = retiredSession.getAndSet(new RetiredSession(previous, previousNonces, Instant.now()));
+            persistRetiredSession();
 
             logger.info("Published a new Xbox session; pointing " + subSessionManagers.size()
                 + " sub-account(s) at it and still hosting the previous one for the players in it");
@@ -699,6 +712,7 @@ public class SessionManager extends SessionManagerCore {
                 if (read.statusCode() == 404 || read.statusCode() == 403) {
                     // Gone, or this account may no longer read it: either way there is nothing to host.
                     if (retiredSession.compareAndSet(retired, null)) {
+                        persistRetiredSession();
                         logger.info("Stopped hosting the previous Xbox session: Xbox no longer has it");
                     }
                     return;
@@ -787,7 +801,66 @@ public class SessionManager extends SessionManagerCore {
      */
     private void closeRetiredSession(RetiredSession retired, String reason) {
         if (retiredSession.compareAndSet(retired, null)) {
+            persistRetiredSession();
             leaveRetiredSession(retired.id, reason);
+        }
+    }
+
+    /**
+     * Writes the retired session as it stands now to storage, or clears it when there is none.
+     * <p>
+     * Called after every change to retiredSession. It reads the value itself rather than taking one,
+     * so when a rotation and a maintenance run change it at the same moment, whichever write lands
+     * last still records the latest state.
+     */
+    private void persistRetiredSession() {
+        synchronized (retiredSessionStoreLock) {
+            RetiredSession current = retiredSession.get();
+            try {
+                if (current == null) {
+                    storageManager().retiredSession("");
+                    return;
+                }
+                JsonObject json = new JsonObject();
+                json.addProperty("id", current.id);
+                json.addProperty("retiredAt", current.retiredAt.toString());
+                storageManager().retiredSession(json.toString());
+            } catch (IOException e) {
+                logger.debug("Could not store the previous Xbox session: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Goes back to hosting the previous session a restart would otherwise forget.
+     * <p>
+     * Its players are still in it and still show it to their friends, but only the host writes the
+     * nonces those friends need to get in, so without this every one of them loses that door until
+     * they reconnect. Its nonces are not stored: the first maintenance run issues fresh ones, as the
+     * current session gets after a restart. If Xbox has dropped the session meanwhile, or it is past
+     * RETIRED_SESSION_MAX_AGE, that same run lets it go.
+     * <p>
+     * Only when nothing is held yet: the update at the end of init() can already have rotated, and
+     * that newer retired session wins.
+     */
+    private void restoreRetiredSession() {
+        try {
+            String stored = storageManager().retiredSession();
+            if (stored == null || stored.isBlank()) {
+                return;
+            }
+            JsonObject json = JsonParser.parseString(stored).getAsJsonObject();
+            String id = json.get("id").getAsString();
+            Instant retiredAt = Instant.parse(json.get("retiredAt").getAsString());
+            if (id.equals(this.sessionInfo.getSessionId())) {
+                // Stale: that session is the current one again. Overwrite it with what is held now.
+                persistRetiredSession();
+            } else if (retiredSession.compareAndSet(null, new RetiredSession(id, new HashMap<>(), retiredAt))) {
+                logger.info("Hosting the previous Xbox session again after the restart");
+                scheduleRetiredMaintenance(true);
+            }
+        } catch (Exception e) {
+            logger.debug("Could not restore the previous Xbox session: " + e.getMessage());
         }
     }
 

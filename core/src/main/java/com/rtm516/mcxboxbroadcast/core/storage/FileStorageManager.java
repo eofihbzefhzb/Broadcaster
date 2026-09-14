@@ -72,6 +72,16 @@ public class FileStorageManager implements StorageManager {
     }
 
     @Override
+    public String retiredSession() throws IOException {
+        return read("retired_session.json");
+    }
+
+    @Override
+    public void retiredSession(String data) throws IOException {
+        write("retired_session.json", data);
+    }
+
+    @Override
     public String subSessions() throws IOException {
         return read("sub_sessions.json");
     }

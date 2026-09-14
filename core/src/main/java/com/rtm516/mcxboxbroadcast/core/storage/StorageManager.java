@@ -19,6 +19,14 @@ public interface StorageManager {
 
     void sessionId(String data) throws IOException;
 
+    /**
+     * The previous Xbox session the primary account still hosts after a rotation, as JSON, or empty
+     * when there is none - so a restart goes on hosting it instead of forgetting the players in it.
+     */
+    String retiredSession() throws IOException;
+
+    void retiredSession(String data) throws IOException;
+
     String subSessions() throws IOException;
     void subSessions(String data) throws IOException;
 

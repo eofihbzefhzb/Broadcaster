@@ -126,8 +126,9 @@ opens it to the people they follow.
 
 A session holds 30 members. At 28 the publisher moves its accounts to a fresh session and
 keeps hosting the previous one until its last player leaves, so the friends of the players
-still in it can go on joining. Only one previous session is kept: it is dropped when the next
-rotation replaces it, after 12 hours, or when the publisher restarts.
+still in it can go on joining. Only one previous session is kept, and a restart of the publisher
+picks it up again from `cache/retired_session.json`; it is dropped when the next rotation replaces
+it or after 12 hours.
 
 Nothing widens the audience beyond that. Both obvious attempts were tried:
 
