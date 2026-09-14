@@ -125,10 +125,10 @@ of the session, and players who join become members, so every player in the sess
 opens it to the people they follow.
 
 A session holds 30 members. At 28 the publisher moves its accounts to a fresh session and
-keeps hosting the previous one until its last player leaves, so the friends of the players
-still in it can go on joining. Only one previous session is kept, and a restart of the publisher
-picks it up again from `cache/retired_session.json`; it is dropped when the next rotation replaces
-it or after 12 hours.
+keeps hosting the earlier one until its last player leaves, so the friends of the players
+still in it can go on joining. Up to five earlier sessions are hosted at once - when a sixth would
+be needed, the one with the fewest players is let go - each for at most 12 hours, and a restart
+of the publisher picks them up again from `cache/retired_session.json`.
 
 Nothing widens the audience beyond that. Both obvious attempts were tried:
 
