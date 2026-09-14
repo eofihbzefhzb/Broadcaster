@@ -120,8 +120,9 @@ public class SessionManager extends SessionManagerCore {
 
     /**
      * Xuid -> when a player was seen arriving in the current session, for the time shown when they
-     * leave. A stay of a few seconds is a join that failed: the client entered the session, then gave
-     * up before or while connecting. Players already present in the first snapshot have no entry.
+     * leave. A stay of a few seconds is usually a join that failed: the client entered the session,
+     * then gave up before or while connecting. Players already present in the first snapshot have no
+     * entry.
      * Guarded like knownMembers.
      */
     private final Map<String, Instant> memberSince = new HashMap<>();
