@@ -197,6 +197,7 @@ public class SessionManager extends SessionManagerCore {
         // Set the internal session information based on the session info
         this.sessionInfo = new ExpandedSessionInfo("", "", sessionInfo);
         reuseStoredSessionId();
+        String storedRetiredSessions = storedRetiredSessions();
 
         super.init();
 
@@ -208,7 +209,7 @@ public class SessionManager extends SessionManagerCore {
         // The session now exists on Xbox, so this is the id the sub-accounts started below may use.
         this.publishedSessionId = this.sessionInfo.getSessionId();
 
-        restoreRetiredSessions();
+        restoreRetiredSessions(storedRetiredSessions);
 
         // Set up the auto friend sync
         this.friendSyncConfig = friendSyncConfig;
@@ -879,6 +880,16 @@ public class SessionManager extends SessionManagerCore {
         }
     }
 
+    /** The earlier sessions a previous run stored, or null when they cannot be read. */
+    private String storedRetiredSessions() {
+        try {
+            return storageManager().retiredSessions();
+        } catch (IOException e) {
+            logger.debug("Could not read the earlier Xbox sessions: " + e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * Goes back to hosting the earlier sessions a restart would otherwise forget.
      * <p>
@@ -889,11 +900,13 @@ public class SessionManager extends SessionManagerCore {
      * RETIRED_SESSION_MAX_AGE, is let go by that same run.
      * <p>
      * The update at the end of init() can already have rotated; the restored sessions are older than
-     * the one that rotation retired, so they go in front of it.
+     * the one that rotation retired, so they go in front of it. That rotation also rewrote storage with
+     * only the session it retired, which is why init() reads what was stored before it runs.
+     *
+     * @param stored The stored earlier sessions, as read before init() published anything
      */
-    private void restoreRetiredSessions() {
+    private void restoreRetiredSessions(String stored) {
         try {
-            String stored = storageManager().retiredSessions();
             if (stored == null || stored.isBlank()) {
                 return;
             }
