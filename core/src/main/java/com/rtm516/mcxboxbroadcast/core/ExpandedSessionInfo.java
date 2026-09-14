@@ -52,12 +52,9 @@ public class ExpandedSessionInfo extends SessionInfo {
      * too, not only the one known at construction.
      */
     private void copyExternalNetherNet(SessionInfo sessionInfo) {
-        setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
 
-        if (sessionInfo.isExternalNetherNetHosted()
-            && sessionInfo.getExternalNetherNetId() != null
-            && !sessionInfo.getExternalNetherNetId().isBlank()) {
+        if (sessionInfo.getExternalNetherNetId() != null && !sessionInfo.getExternalNetherNetId().isBlank()) {
             this.netherNetId = new BigInteger(sessionInfo.getExternalNetherNetId());
         }
     }

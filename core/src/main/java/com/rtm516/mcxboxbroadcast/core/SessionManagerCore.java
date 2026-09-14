@@ -247,7 +247,7 @@ public abstract class SessionManagerCore {
             // to the server address, and a transferred player leaves the Xbox session, so their friends
             // can no longer see or join it. The session always advertises the ingress Geyser hosts,
             // and without Geyser's id there is nothing to publish.
-            if (!this.sessionInfo.isExternalNetherNetHosted()) {
+            if (this.sessionInfo.getExternalNetherNetId() == null || this.sessionInfo.getExternalNetherNetId().isBlank()) {
                 throw new SessionCreationException("No Geyser NetherNet ID to publish. Start Velocity with the Geyser fork's portal-bridge enabled first.");
             }
             // The id Minecraft's session token carries, advertised beside Geyser's NetherNet id.
@@ -258,7 +258,7 @@ public abstract class SessionManagerCore {
             if (this.sessionInfo.getPmsgId() == null || this.sessionInfo.getPmsgId().isBlank()) {
                 throw new SessionCreationException("No PmsgId in the Minecraft session token.");
             }
-            logger.info("Using externally hosted NetherNet ID: " + this.sessionInfo.getNetherNetId());
+            logger.info("Advertising Geyser's NetherNet ID: " + this.sessionInfo.getNetherNetId());
         }
 
         // Set the showcase image to the current screenshot

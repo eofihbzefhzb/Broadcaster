@@ -188,7 +188,7 @@ public class StandaloneMain {
             logger.warn("Geyser NetherNet status is not ready; keeping the Xbox session unchanged until Geyser is ready.");
             return false;
         }
-        if (config.session().syncFromGeyser() && isExternalNetherNetEnabled() && updateSessionInfoFromStatusFile(sessionInfo)) {
+        if (config.session().syncFromGeyser() && updateSessionInfoFromStatusFile(sessionInfo)) {
             return true;
         }
 
@@ -278,12 +278,7 @@ public class StandaloneMain {
      * whenever that id is discovered or changes.
      */
     private static void applyExternalNetherNet(SessionInfo sessionInfo) {
-        sessionInfo.setExternalNetherNetHosted(isExternalNetherNetEnabled());
         sessionInfo.setExternalNetherNetId(effectiveExternalNetworkId());
-    }
-
-    private static boolean isExternalNetherNetEnabled() {
-        return !effectiveExternalNetworkId().isBlank();
     }
 
     private static String effectiveExternalNetworkId() {

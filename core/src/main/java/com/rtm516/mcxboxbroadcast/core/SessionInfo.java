@@ -14,7 +14,6 @@ public class SessionInfo {
     private int maxPlayers;
     private String ip;
     private int port;
-    private boolean externalNetherNetHosted;
     private String externalNetherNetId;
 
     public SessionInfo() {
@@ -102,14 +101,6 @@ public class SessionInfo {
         this.port = port;
     }
 
-    public boolean isExternalNetherNetHosted() {
-        return externalNetherNetHosted;
-    }
-
-    public void setExternalNetherNetHosted(boolean externalNetherNetHosted) {
-        this.externalNetherNetHosted = externalNetherNetHosted;
-    }
-
     public String getExternalNetherNetId() {
         return externalNetherNetId;
     }
@@ -120,7 +111,6 @@ public class SessionInfo {
 
     public SessionInfo copy() {
         SessionInfo copy = new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
-        copy.setExternalNetherNetHosted(externalNetherNetHosted);
         copy.setExternalNetherNetId(externalNetherNetId);
         return copy;
     }

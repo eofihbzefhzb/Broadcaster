@@ -112,8 +112,7 @@ public class SubSessionManager extends SessionManagerCore {
 
         // MUST be carried over from the parent: SessionManagerCore#createSession refuses to publish
         // an account without Geyser's NetherNet id.
-        if (parentInfo != null && parentInfo.isExternalNetherNetHosted()) {
-            memberInfo.setExternalNetherNetHosted(true);
+        if (parentInfo != null) {
             memberInfo.setExternalNetherNetId(parentInfo.getExternalNetherNetId());
         }
 
