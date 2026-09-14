@@ -86,8 +86,8 @@ public interface CoreConfig {
         @ExcludePlatform(platforms = {"Extension"})
         SessionInfo sessionInfo();
 
-        // No ice-port-range: it only limits the ports of upstream's own NetherNet listener, which this
-        // fork never starts - Geyser accepts the WebRTC connections.
+        // No ice-port-range: it only limited the ports of upstream's own NetherNet listener, which this
+        // fork does not have - Geyser accepts the WebRTC connections.
 
         @ConfigSerializable
         interface SessionInfo {
@@ -172,7 +172,7 @@ public interface CoreConfig {
             @Comment("""
                 Should we unfriend people that haven't joined the server in a while.
                 Leave this off. Upstream records a friend's last visit when its own NetherNet listener
-                transfers them; this fork never starts that listener - players join through Geyser -
+                transfers them; this fork does not have that listener - players join through Geyser -
                 so nothing refreshes the record after it is first written. Turned on, this would
                 unfriend every friend 'days' after they were first seen - daily players included -
                 and take the server out of all of their friends lists.""")

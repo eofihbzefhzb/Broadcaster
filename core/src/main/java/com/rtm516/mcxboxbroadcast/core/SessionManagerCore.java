@@ -12,21 +12,10 @@ import com.rtm516.mcxboxbroadcast.core.models.session.SessionRef;
 import com.rtm516.mcxboxbroadcast.core.models.session.SocialSummaryResponse;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
-import com.rtm516.mcxboxbroadcast.core.nethernet.BroadcasterChannelInitializer;
-import dev.kastle.netty.channel.nethernet.NetherNetChannelFactory;
-import dev.kastle.netty.channel.nethernet.config.NetherChannelOption;
-import dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling;
-import dev.kastle.webrtc.PeerConnectionFactory;
-import dev.kastle.webrtc.PortAllocatorConfig;
-import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import net.raphimc.minecraftauth.bedrock.BedrockAuthManager;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -55,13 +44,6 @@ public abstract class SessionManagerCore {
     protected String lastSessionResponse;
 
     protected boolean initialized = false;
-
-    private Channel netherNetChannel;
-    private EventLoopGroup bossGroup;
-    private EventLoopGroup workerGroup;
-    private NetherNetXboxRpcSignaling signaling;
-
-    private PortAllocatorConfig netherNetPortAllocatorConfig;
 
     /**
      * Create an instance of SessionManager
@@ -261,14 +243,14 @@ public abstract class SessionManagerCore {
                 throw new SessionCreationException("Unable to get connectionId for session: " + e.getMessage());
             }
 
-            // This fork never starts upstream's own NetherNet listener (setupNetherNet()): it answers a
-            // join with a transfer to the server address, and a transferred player leaves the Xbox
-            // session, so their friends can no longer see or join it. The session always advertises
-            // the ingress Geyser hosts, and without Geyser's id there is nothing to publish.
+            // This fork has no NetherNet listener of its own. Upstream's answered a join with a transfer
+            // to the server address, and a transferred player leaves the Xbox session, so their friends
+            // can no longer see or join it. The session always advertises the ingress Geyser hosts,
+            // and without Geyser's id there is nothing to publish.
             if (!this.sessionInfo.isExternalNetherNetHosted()) {
                 throw new SessionCreationException("No Geyser NetherNet ID to publish. Start Velocity with the Geyser fork's portal-bridge enabled first.");
             }
-            // setupNetherNet() is what normally sets this value, so it is read here instead.
+            // The id Minecraft's session token carries, advertised beside Geyser's NetherNet id.
             this.sessionInfo.setPmsgId(manager.getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid"));
             if (this.sessionInfo.getNetherNetId() == null || this.sessionInfo.getNetherNetId().signum() < 1) {
                 throw new SessionCreationException("No valid Geyser NetherNet ID. Wait for Geyser readiness before publishing.");
@@ -366,7 +348,7 @@ public abstract class SessionManagerCore {
     protected void leaveSession(String sessionId) throws SessionUpdateException {
         HttpRequest leaveRequest = HttpRequest.newBuilder()
             .uri(URI.create(Constants.CREATE_SESSION.formatted(sessionId)))
-            // Bounded: both callers hold a lock while this runs - SessionManager its previous-session
+            // Bounded: both callers hold a lock while this runs - SessionManager its earlier-sessions
             // lock, a sub-account its own monitor - and an unanswered request must not hold either
             // forever.
             .timeout(Duration.ofSeconds(15))
@@ -483,16 +465,12 @@ public abstract class SessionManagerCore {
      * This should be called before any updates to the session otherwise they might fail
      */
     protected void checkConnection() {
+        // Only the RTA websocket belongs to this process: the NetherNet channel and its signaling are
+        // Geyser's in this fork.
         boolean rtaIsOpen = this.rtaWebsocket != null && this.rtaWebsocket.isOpen();
-        // The NetherNet channel and its signaling belong to Geyser in this fork: setupNetherNet() never
-        // runs, and both fields stay null for the whole life of the process - so upstream's plain null
-        // checks would read as "down" on every pass and recreate the session in a loop.
-        boolean externalHosted = this.sessionInfo != null && this.sessionInfo.isExternalNetherNetHosted();
-        boolean rtcIsOpen = externalHosted || this.netherNetChannel != null && this.netherNetChannel.isOpen();
-        boolean signalingIsOpen = externalHosted || this.signaling != null && this.signaling.isActive();
 
         // Check if the connection is Lost
-        if (!rtaIsOpen || !rtcIsOpen || !signalingIsOpen) {
+        if (!rtaIsOpen) {
             try {
                 // Re-publishing, not re-creating: createSession() below PUTs against whatever id
                 // the session currently holds, so everyone already in it stays a member - which
@@ -500,8 +478,6 @@ public abstract class SessionManagerCore {
                 // friends. A dropped websocket therefore costs no reach at all. The id only changes
                 // in SessionManager#rotateSession, when the session fills to its member cap.
                 logger.warn("Connection to websocket lost, re-publishing the Xbox session...");
-                logger.debug("WebSocket status: RTA Open: " + rtaIsOpen + ", RTC Open: " + rtcIsOpen + ", Signaling: " + signalingIsOpen);
-
                 createSession();
                 logger.info("Websocket reconnected; the Xbox session kept its members");
             } catch (SessionCreationException | SessionUpdateException e) {
@@ -545,105 +521,14 @@ public abstract class SessionManagerCore {
     }
 
     /**
-     * Restrict the local UDP port range used for WebRTC (NetherNet) ICE candidates.
-     * Passing 0 for both min and max keeps the transport default (the OS ephemeral
-     * range).
-     *
-     * @param min The lowest UDP port to use, or 0 for the OS default
-     * @param max The highest UDP port to use, or 0 for the OS default
-     */
-    public void setNetherNetPortRange(int min, int max) {
-        if (min <= 0 && max <= 0) {
-            this.netherNetPortAllocatorConfig = null;
-            return;
-        }
-
-        // Setting the channel option replaces the whole PortAllocatorConfig, so the
-        // transport's default flags (see DefaultNetherChannelConfig) are mirrored
-        // here and only the port range is overridden.
-        PortAllocatorConfig config = new PortAllocatorConfig()
-            .setDisableTcp(true)
-            .setEnableIpv6(true)
-            .setEnableIpv6OnWifi(true)
-            .setEnableAnyAddressPorts(true)
-            .setEnableSharedSocket(true);
-        config.minPort = min;
-        config.maxPort = max;
-
-        this.netherNetPortAllocatorConfig = config;
-    }
-
-    /**
-     * @return The WebRTC port allocator config to use for NetherNet, or null to use
-     *         the transport default
-     */
-    protected PortAllocatorConfig netherNetPortAllocatorConfig() {
-        return netherNetPortAllocatorConfig;
-    }
-
-    protected void setupNetherNet() {
-        shutdownNetherNet();
-
-        long netherNetId = this.sessionInfo.getNetherNetId().longValue();
-
-        this.signaling = new NetherNetXboxRpcSignaling(netherNetId, getMCTokenHeader());
-        this.sessionInfo.setPmsgId(getAuthManager().getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid"));
-
-        this.bossGroup = new NioEventLoopGroup(1);
-        this.workerGroup = new NioEventLoopGroup();
-
-        try {
-            ServerBootstrap b = new ServerBootstrap();
-            b.group(bossGroup, workerGroup)
-                .channelFactory(NetherNetChannelFactory.server(new PeerConnectionFactory(), signaling))
-                .childHandler(new BroadcasterChannelInitializer(sessionInfo, this, logger));
-
-            PortAllocatorConfig portAllocatorConfig = netherNetPortAllocatorConfig();
-            if (portAllocatorConfig != null) {
-                b.option(NetherChannelOption.NETHER_PORT_ALLOCATOR_CONFIG, portAllocatorConfig);
-            }
-
-            this.netherNetChannel = b.bind(new InetSocketAddress(0)).sync().channel();
-
-            logger.info("NetherNet Broadcaster started on ID: " + netherNetId
-                + (portAllocatorConfig != null
-                    ? " (ICE ports " + portAllocatorConfig.minPort + "-" + portAllocatorConfig.maxPort + ")"
-                    : ""));
-        } catch (Exception e) {
-            logger.error("Failed to start NetherNet", e);
-        }
-    }
-
-    /**
      * Stop the current session and close the websocket
      */
     public void shutdown() {
         if (rtaWebsocket != null) {
             rtaWebsocket.close();
         }
-        
-        shutdownNetherNet();
-        
-        this.initialized = false;
-    }
 
-    private void shutdownNetherNet() {
-        if (netherNetChannel != null) {
-            netherNetChannel.close();
-            netherNetChannel = null;
-        }
-        if (signaling != null) {
-            signaling.close();
-            signaling = null;
-        }
-        if (bossGroup != null) {
-            bossGroup.shutdownGracefully();
-            bossGroup = null;
-        }
-        if (workerGroup != null) {
-            workerGroup.shutdownGracefully();
-            workerGroup = null;
-        }
+        this.initialized = false;
     }
 
     /**

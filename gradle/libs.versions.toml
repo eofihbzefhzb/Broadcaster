@@ -11,10 +11,8 @@ methanol = "1.7.0"
 minecraftauth = "5.0.1-20260507.085226-5"
 gson = "2.11.0"
 sqlite = "3.50.2.0"
-webrtc = "1.0.4"
 configurate = "4.2.0-GeyserMC-20251111.004649-11"
 configurate-core = "4.2.0-GeyserMC-20251111.004649-12"
-netty-transport-nethernet = "1.7.4"
 
 shadow = "9.3.0"
 indra = "3.1.3"
@@ -56,9 +54,6 @@ methanol = { group = "com.github.mizosoft.methanol", name = "methanol", version.
 
 minecraftauth = { group = "net.raphimc", name = "MinecraftAuth", version.ref = "minecraftauth" }
 
-netty-transport-nethernet = { group = "dev.kastle.netty", name = "netty-transport-nethernet", version.ref = "netty-transport-nethernet" }
-
-webrtc = { group = "dev.kastle.webrtc", name = "webrtc-java", version.ref = "webrtc" }
 sqlite = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqlite" }
 
 [bundles]

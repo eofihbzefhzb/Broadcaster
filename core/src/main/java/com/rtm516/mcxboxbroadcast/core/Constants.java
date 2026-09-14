@@ -21,7 +21,6 @@ public class Constants {
     public static final String TEMPLATE_NAME = "MinecraftLobby";
     public static final String TITLE_ID = "896928775"; // The title ID for Minecraft Windows Edition
     public static final String CREATE_SESSION = "https://sessiondirectory.xboxlive.com/serviceconfigs/" + SERVICE_CONFIG_ID + "/sessionTemplates/" + TEMPLATE_NAME + "/sessions/%s";
-    public static final String JOIN_SESSION = "https://sessiondirectory.xboxlive.com/handles/%s/session";
 
     public static final URI RTA_WEBSOCKET = URI.create("wss://rta.xboxlive.com/connect");
     public static final URI CREATE_HANDLE = URI.create("https://sessiondirectory.xboxlive.com/handles");
@@ -49,7 +48,7 @@ public class Constants {
     public static final int MAX_FRIENDS = 2000;
 
     /**
-     * Used for the micro nethernet server that transfers the client to the real server
+     * The Bedrock version and protocol the Xbox session advertises
      */
     public static final BedrockCodec BEDROCK_CODEC = Bedrock_v2169.CODEC;
 

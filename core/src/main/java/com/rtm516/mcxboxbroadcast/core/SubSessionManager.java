@@ -7,7 +7,6 @@ import com.rtm516.mcxboxbroadcast.core.models.session.JoinSessionRequest;
 import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionResponse;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
-import dev.kastle.webrtc.PortAllocatorConfig;
 
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -49,11 +48,6 @@ public class SubSessionManager extends SessionManagerCore {
     @Override
     public ScheduledExecutorService scheduledThread() {
         return parent.scheduledThread();
-    }
-
-    @Override
-    protected PortAllocatorConfig netherNetPortAllocatorConfig() {
-        return parent.netherNetPortAllocatorConfig();
     }
 
     /**
