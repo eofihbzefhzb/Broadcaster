@@ -47,7 +47,7 @@ public class ExpandedSessionInfo extends SessionInfo {
     }
 
     /**
-     * In external-hosted mode, adopts the NetherNet id Geyser listens on. netherNetId is what the
+     * Adopts the NetherNet id Geyser listens on, once it is known. netherNetId is what the
      * session advertises under SupportedConnections, so it has to follow an id discovered at runtime
      * too, not only the one known at construction.
      */

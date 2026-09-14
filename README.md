@@ -8,7 +8,7 @@ It is not documented here as the stock upstream project. This README only covers
 
 ## What This Fork Adds
 
-- `external-hosted` NetherNet publish mode (on by default) for pairing with the Geyser fork's ingress; turned off, joins go through upstream's own listener and transfer
+- publishing for the Geyser fork's NetherNet ingress in place of upstream's own listener, whose transfer takes players out of the Xbox session and hides it from their friends
 - sub-accounts that join the primary session, and rotation to a fresh session at the member cap
 - a standalone jar release for Xbox session publishing
 
@@ -25,7 +25,7 @@ Bedrock client
     -> Paper Java server
 ```
 
-MCXboxBroadcast does not open a Bedrock listener in `external-hosted` mode. Geyser owns
+MCXboxBroadcast never opens a Bedrock listener of its own. Geyser owns
 the live NetherNet connection and Paper owns the Java game, so the `session-info` address
 and port in `config.yml` do not need to be your public, router-forwarded Bedrock port.
 
@@ -84,7 +84,6 @@ Geyser's atomic readiness file:
 
 ```yaml
 nether-net:
-  external-hosted: true
   external-network-id: ''
   status-file-path: ''
   discovery-timeout-seconds: 120

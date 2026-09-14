@@ -100,12 +100,12 @@ public class StandaloneMain {
         applyExternalNetherNet(sessionInfo);
 
         // Wait for Geyser off the main thread, which goes on to start the console below.
-        if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
+        if (effectiveExternalNetworkId().isBlank()) {
             CompletableFuture.runAsync(() -> {
                 discoveredExternalNetworkId = waitForExternalNetworkId();
 
                 if (discoveredExternalNetworkId.isBlank()) {
-                    logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
+                    logger.error("No Geyser NetherNet network ID is available yet.");
                     logger.error("Start Velocity with the Geyser fork and portal-bridge enabled so it writes portal-session-status.json, then start MCXboxBroadcast again.");
                     sessionManager.shutdown();
                     System.exit(1);
@@ -122,10 +122,7 @@ public class StandaloneMain {
     }
 
     private static void continueInitialization() {
-        if (isExternalNetherNetEnabled()) {
-            logger.info("Mode: PUBLISH + EXTERNAL NETHERNET");
-            logger.info("Xbox Live session publishing is enabled for externally hosted NetherNet ID " + effectiveExternalNetworkId());
-        }
+        logger.info("Xbox Live session publishing is enabled for Geyser's NetherNet ID " + effectiveExternalNetworkId());
 
         // Fallback to the gamertag if the host name is empty
         if (sessionInfo.getHostName().isEmpty()) {
@@ -189,9 +186,7 @@ public class StandaloneMain {
 
     private static boolean updateSessionInfo(SessionInfo sessionInfo) {
         refreshExternalNetworkId();
-        if (config.netherNet().externalHosted()
-            && config.netherNet().externalNetworkId().isBlank()
-            && !hasReadyExternalNetworkStatus()) {
+        if (config.netherNet().externalNetworkId().isBlank() && !hasReadyExternalNetworkStatus()) {
 
             logger.warn("Geyser NetherNet status is not ready; keeping the Xbox session unchanged until Geyser is ready.");
             return false;
@@ -282,8 +277,8 @@ public class StandaloneMain {
     }
 
     /**
-     * Tells the session whether Geyser hosts the NetherNet ingress, and on which id. Re-applied whenever
-     * that id is discovered or changes.
+     * Tells the session which NetherNet id Geyser hosts the ingress on, once one is known. Re-applied
+     * whenever that id is discovered or changes.
      */
     private static void applyExternalNetherNet(SessionInfo sessionInfo) {
         sessionInfo.setExternalNetherNetHosted(isExternalNetherNetEnabled());
@@ -291,7 +286,7 @@ public class StandaloneMain {
     }
 
     private static boolean isExternalNetherNetEnabled() {
-        return config.netherNet().externalHosted() && !effectiveExternalNetworkId().isBlank();
+        return !effectiveExternalNetworkId().isBlank();
     }
 
     private static String effectiveExternalNetworkId() {
@@ -302,9 +297,6 @@ public class StandaloneMain {
     }
 
     private static String discoverExternalNetworkId() {
-        if (!config.netherNet().externalHosted()) {
-            return "";
-        }
         if (!config.netherNet().externalNetworkId().isBlank()) {
             return config.netherNet().externalNetworkId().trim();
         }
@@ -346,7 +338,7 @@ public class StandaloneMain {
     }
 
     private static void refreshExternalNetworkId() {
-        if (!config.netherNet().externalHosted() || !config.netherNet().externalNetworkId().isBlank()) {
+        if (!config.netherNet().externalNetworkId().isBlank()) {
             return;
         }
 

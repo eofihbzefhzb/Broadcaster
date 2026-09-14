@@ -116,10 +116,8 @@ public class SubSessionManager extends SessionManagerCore {
         String worldName = parentInfo != null ? parentInfo.getWorldName() : null;
         memberInfo.setWorldName(worldName == null || worldName.isBlank() ? memberInfo.getHostName() : worldName);
 
-        // MUST be carried over from the parent. SessionManagerCore#createSession only skips
-        // setupNetherNet() when this flag is set; without it every sub-session spins up its own
-        // local NetherNet listener on an id Geyser never bound, and anyone joining through that
-        // account hangs on "Searching for game session" because nothing answers on that id.
+        // MUST be carried over from the parent: SessionManagerCore#createSession refuses to publish
+        // an account without Geyser's NetherNet id.
         if (parentInfo != null && parentInfo.isExternalNetherNetHosted()) {
             memberInfo.setExternalNetherNetHosted(true);
             memberInfo.setExternalNetherNetId(parentInfo.getExternalNetherNetId());

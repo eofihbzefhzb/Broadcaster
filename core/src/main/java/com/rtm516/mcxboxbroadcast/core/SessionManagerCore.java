@@ -150,8 +150,8 @@ public abstract class SessionManagerCore {
     /**
      * Ensure the Xbox authentication cache is loaded and its refreshable
      * tokens are current. This is intentionally separate from session
-     * creation so external-hosted NetherNet mode can refresh authentication
-     * before Geyser attempts to bind its signaling channel.
+     * creation so authentication is refreshed before Geyser binds its
+     * NetherNet signaling channel with the same token.
      */
     public void ensureAuthenticated() {
         getAuthManager();
@@ -261,26 +261,22 @@ public abstract class SessionManagerCore {
                 throw new SessionCreationException("Unable to get connectionId for session: " + e.getMessage());
             }
 
-            if (this.sessionInfo.isExternalNetherNetHosted()) {
-                // External-hosted mode still publishes a Minecraft JSON-RPC
-                // connection. setupNetherNet() normally initializes this
-                // value, but that method is intentionally skipped when the
-                // actual NetherNet listener lives in Geyser.
-                this.sessionInfo.setPmsgId(manager.getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid"));
-                if (this.sessionInfo.getNetherNetId() == null || this.sessionInfo.getNetherNetId().signum() < 1) {
-                    throw new SessionCreationException("External NetherNet mode has no valid NetherNet ID. Wait for Geyser readiness before publishing.");
-                }
-                if (this.sessionInfo.getPmsgId() == null || this.sessionInfo.getPmsgId().isBlank()) {
-                    throw new SessionCreationException("External NetherNet mode has no PmsgId in the Minecraft session token.");
-                }
-                logger.info("Using externally hosted NetherNet ID: " + this.sessionInfo.getNetherNetId());
-            } else {
-                setupNetherNet();
-
-                if (this.netherNetChannel == null || !this.netherNetChannel.isOpen()) {
-                    throw new SessionCreationException("Unable to start NetherNet channel");
-                }
+            // This fork never starts upstream's own NetherNet listener (setupNetherNet()): it answers a
+            // join with a transfer to the server address, and a transferred player leaves the Xbox
+            // session, so their friends can no longer see or join it. The session always advertises
+            // the ingress Geyser hosts, and without Geyser's id there is nothing to publish.
+            if (!this.sessionInfo.isExternalNetherNetHosted()) {
+                throw new SessionCreationException("No Geyser NetherNet ID to publish. Start Velocity with the Geyser fork's portal-bridge enabled first.");
             }
+            // setupNetherNet() is what normally sets this value, so it is read here instead.
+            this.sessionInfo.setPmsgId(manager.getMinecraftSession().getCached().getParsedToken().getPayload().reqString("pmid"));
+            if (this.sessionInfo.getNetherNetId() == null || this.sessionInfo.getNetherNetId().signum() < 1) {
+                throw new SessionCreationException("No valid Geyser NetherNet ID. Wait for Geyser readiness before publishing.");
+            }
+            if (this.sessionInfo.getPmsgId() == null || this.sessionInfo.getPmsgId().isBlank()) {
+                throw new SessionCreationException("No PmsgId in the Minecraft session token.");
+            }
+            logger.info("Using externally hosted NetherNet ID: " + this.sessionInfo.getNetherNetId());
         }
 
         // Set the showcase image to the current screenshot
@@ -488,9 +484,8 @@ public abstract class SessionManagerCore {
      */
     protected void checkConnection() {
         boolean rtaIsOpen = this.rtaWebsocket != null && this.rtaWebsocket.isOpen();
-        // The NetherNet channel and its signaling only belong to this process when it hosts the
-        // listener itself. In external-hosted mode Geyser owns them, setupNetherNet() never runs,
-        // and both fields stay null for the whole life of the process - so upstream's plain null
+        // The NetherNet channel and its signaling belong to Geyser in this fork: setupNetherNet() never
+        // runs, and both fields stay null for the whole life of the process - so upstream's plain null
         // checks would read as "down" on every pass and recreate the session in a loop.
         boolean externalHosted = this.sessionInfo != null && this.sessionInfo.isExternalNetherNetHosted();
         boolean rtcIsOpen = externalHosted || this.netherNetChannel != null && this.netherNetChannel.isOpen();

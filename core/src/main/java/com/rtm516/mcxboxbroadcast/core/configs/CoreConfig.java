@@ -139,12 +139,6 @@ public interface CoreConfig {
     @ConfigSerializable
     interface NetherNetConfig {
         @Comment("""
-            Publish an externally hosted NetherNet session instead of binding MCXboxBroadcast's own NetherNet gameplay listener.
-            Enable this when another process such as a Geyser fork terminates the actual Bedrock/NetherNet join path.""")
-        @DefaultBoolean(true)
-        boolean externalHosted();
-
-        @Comment("""
             The externally hosted NetherNet network id to advertise in the Xbox session.
             This must match the listener that accepts the NetherNet/WebRTC join.
             Leave empty to auto-discover it.""")
@@ -195,10 +189,9 @@ public interface CoreConfig {
         interface ExpiryConfig {
             @Comment("""
                 Should we unfriend people that haven't joined the server in a while.
-                Leave this off with nether-net.external-hosted. A friend's last visit is only recorded
-                when this process's own NetherNet listener transfers them; players who join through
-                Geyser never pass through it, so nothing refreshes the record after it is first
-                written. Turned on, this would unfriend every friend 'days' after they were first
+                Leave this off. Upstream records a friend's last visit when its own NetherNet listener
+                transfers them; this fork never starts that listener - players join through Geyser -
+                so nothing refreshes the record after it is first written. Turned on, this would unfriend every friend 'days' after they were first
                 seen - daily players included - and take the server out of all of their friends lists.""")
             @DefaultBoolean(false)
             boolean enabled();
