@@ -14,20 +14,6 @@ public class SessionInfo {
     private int maxPlayers;
     private String ip;
     private int port;
-    private String joinability = "joinable_by_friends";
-    /** Xbox MPSD system-level gates. "followed" (default); Xbox rejects "none" for Minecraft's session template. */
-    private String readRestriction = "followed";
-    private String joinRestriction = "followed";
-    private String worldType = "Survival";
-    /** @see CoreConfig.XboxSessionConfig#broadcastSetting() */
-    private int broadcastSetting = 3;
-
-    /** @see CoreConfig.XboxSessionConfig#lanGame() */
-    private boolean lanGame = true;
-    private boolean editorWorld;
-    private boolean hardcore;
-    private String relayTargetAddress;
-    private int relayTargetPort;
     private boolean externalNetherNetHosted;
     private String externalNetherNetId;
 
@@ -116,70 +102,6 @@ public class SessionInfo {
         this.port = port;
     }
 
-    public String getJoinability() {
-        return joinability;
-    }
-
-    public String getReadRestriction() {
-        return readRestriction;
-    }
-
-    public void setReadRestriction(String readRestriction) {
-        this.readRestriction = readRestriction;
-    }
-
-    public String getJoinRestriction() {
-        return joinRestriction;
-    }
-
-    public void setJoinRestriction(String joinRestriction) {
-        this.joinRestriction = joinRestriction;
-    }
-
-    public void setJoinability(String joinability) {
-        this.joinability = joinability;
-    }
-
-    public String getWorldType() {
-        return worldType;
-    }
-
-    public void setWorldType(String worldType) {
-        this.worldType = worldType;
-    }
-
-    public boolean isEditorWorld() {
-        return editorWorld;
-    }
-
-    public void setEditorWorld(boolean editorWorld) {
-        this.editorWorld = editorWorld;
-    }
-
-    public boolean isHardcore() {
-        return hardcore;
-    }
-
-    public void setHardcore(boolean hardcore) {
-        this.hardcore = hardcore;
-    }
-
-    public String getRelayTargetAddress() {
-        return relayTargetAddress;
-    }
-
-    public void setRelayTargetAddress(String relayTargetAddress) {
-        this.relayTargetAddress = relayTargetAddress;
-    }
-
-    public int getRelayTargetPort() {
-        return relayTargetPort;
-    }
-
-    public void setRelayTargetPort(int relayTargetPort) {
-        this.relayTargetPort = relayTargetPort;
-    }
-
     public boolean isExternalNetherNetHosted() {
         return externalNetherNetHosted;
     }
@@ -196,34 +118,8 @@ public class SessionInfo {
         this.externalNetherNetId = externalNetherNetId;
     }
 
-    public int getBroadcastSetting() {
-        return broadcastSetting;
-    }
-
-    public boolean isLanGame() {
-        return lanGame;
-    }
-
-    public void setLanGame(boolean lanGame) {
-        this.lanGame = lanGame;
-    }
-
-    public void setBroadcastSetting(int broadcastSetting) {
-        this.broadcastSetting = broadcastSetting;
-    }
-
     public SessionInfo copy() {
         SessionInfo copy = new SessionInfo(hostName, worldName, players, maxPlayers, ip, port);
-        copy.setJoinability(joinability);
-        copy.setReadRestriction(readRestriction);
-        copy.setJoinRestriction(joinRestriction);
-        copy.setWorldType(worldType);
-        copy.setBroadcastSetting(broadcastSetting);
-        copy.setLanGame(lanGame);
-        copy.setEditorWorld(editorWorld);
-        copy.setHardcore(hardcore);
-        copy.setRelayTargetAddress(relayTargetAddress);
-        copy.setRelayTargetPort(relayTargetPort);
         copy.setExternalNetherNetHosted(externalNetherNetHosted);
         copy.setExternalNetherNetId(externalNetherNetId);
         return copy;

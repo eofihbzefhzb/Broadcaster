@@ -38,7 +38,6 @@ public class StandaloneMain {
     private static StandaloneLoggerImpl logger;
     private static SessionInfo sessionInfo;
     private static NotificationManager notificationManager;
-    private static StandaloneBridgeService bridgeService;
     private static String discoveredExternalNetworkId;
 
     // Remembers the last network id that was logged, so the discovery loop reports a given id once
@@ -47,41 +46,23 @@ public class StandaloneMain {
     public static SessionManager sessionManager;
 
     /**
-     * Dynamically resolves candidate paths for the Geyser status file.
-     * Prioritizes user-defined config, JVM arguments, and environment variables before falling back to common relative paths.
+     * Where to look for Geyser's status file: the path set in config.yml first, then the places it
+     * sits when this process runs from a folder next to Velocity's.
      */
     private static Iterable<String> getStatusFileCandidates() {
         List<String> candidates = new ArrayList<>();
 
-        // 1. Highest Priority: The path explicitly set in config.yml
-        if (config != null && config.netherNet() != null) {
-            String configPath = config.netherNet().statusFilePath();
-            if (configPath != null && !configPath.isBlank()) {
-                candidates.add(configPath);
-            }
+        String configPath = config.netherNet().statusFilePath();
+        if (!configPath.isBlank()) {
+            candidates.add(configPath);
         }
 
-        // 2. Check for a JVM argument: java -Dgeyser.status.file="/path/to/file.json" -jar MCXboxBroadcastStandalone.jar
-        String sysProp = System.getProperty("geyser.status.file");
-        if (sysProp != null && !sysProp.isBlank()) {
-            candidates.add(sysProp);
-        }
-
-        // 3. Check for an Environment Variable
-        String envVar = System.getenv("GEYSER_STATUS_FILE");
-        if (envVar != null && !envVar.isBlank()) {
-            candidates.add(envVar);
-        }
-
-        // 4. Fallback to common relative and home directory paths
         candidates.addAll(Arrays.asList(
             "./portal-session-status.json",
             "../portal-session-status.json",
             "../plugins/Geyser-Velocity/portal-session-status.json",
             "../../plugins/Geyser-Velocity/portal-session-status.json",
-            "../Velocity/plugins/Geyser-Velocity/portal-session-status.json",
-            System.getProperty("user.home") + "/mc/plugins/Geyser-Velocity/portal-session-status.json",
-            System.getProperty("user.home") + "/mc/server/plugins/Geyser-Velocity/portal-session-status.json"
+            "../Velocity/plugins/Geyser-Velocity/portal-session-status.json"
         ));
 
         return candidates;
@@ -106,34 +87,30 @@ public class StandaloneMain {
 
         // TODO Support multiple notification types
         notificationManager = new SlackNotificationManager(logger, config.notifications());
-        if (config.enabled()) {
-            sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
-            sessionManager.setNetherNetPortRange(config.session().icePortRange().min(), config.session().icePortRange().max());
-            logger.info("Refreshing Xbox authentication before NetherNet discovery...");
-            sessionManager.ensureAuthenticated();
-            logger.info("Xbox authentication is ready for NetherNet signaling.");
-        }
+
+        sessionManager = new SessionManager(new FileStorageManager("./cache", "./screenshot.jpg"), notificationManager, logger);
+        sessionManager.setNetherNetPortRange(config.session().icePortRange().min(), config.session().icePortRange().max());
+        logger.info("Refreshing Xbox authentication before NetherNet discovery...");
+        sessionManager.ensureAuthenticated();
+        logger.info("Xbox authentication is ready for NetherNet signaling.");
 
         discoveredExternalNetworkId = discoverExternalNetworkId();
 
         sessionInfo = new SessionInfo(config.session().sessionInfo());
-        applySessionSettings(sessionInfo);
+        applyExternalNetherNet(sessionInfo);
 
         // Wait for Geyser off the main thread, which goes on to start the console below.
-        if (config.enabled() && config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
+        if (config.netherNet().externalHosted() && effectiveExternalNetworkId().isBlank()) {
             CompletableFuture.runAsync(() -> {
                 discoveredExternalNetworkId = waitForExternalNetworkId();
 
                 if (discoveredExternalNetworkId.isBlank()) {
                     logger.error("Geyser-backed mode is enabled, but no NetherNet network ID is available yet.");
                     logger.error("Start Velocity with the Geyser fork and portal-bridge enabled so it writes portal-session-status.json, then start MCXboxBroadcast again.");
-                    if (sessionManager != null) {
-                        sessionManager.shutdown();
-                        sessionManager = null;
-                    }
+                    sessionManager.shutdown();
                     System.exit(1);
                 } else {
-                    applySessionSettings(sessionInfo);
+                    applyExternalNetherNet(sessionInfo);
                     continueInitialization();
                 }
             });
@@ -145,45 +122,29 @@ public class StandaloneMain {
     }
 
     private static void continueInitialization() {
-        logMode();
-
-        if (isLocalBridgeEnabled()) {
-            bridgeService = new StandaloneBridgeService(config, logger.prefixed("bridge"), () -> sessionInfo);
-            // "stop"/"exit" ends the process through System.exit(), so the listener and its event
-            // loop group are only released if that release hangs off a shutdown hook. Registered
-            // before start() so a failed bind still frees the group it already allocated.
-            StandaloneBridgeService serviceToStop = bridgeService;
-            Runtime.getRuntime().addShutdownHook(new Thread(serviceToStop::stop, "MCXboxBroadcast-bridge-shutdown"));
-            bridgeService.start();
+        if (isExternalNetherNetEnabled()) {
+            logger.info("Mode: PUBLISH + EXTERNAL NETHERNET");
+            logger.info("Xbox Live session publishing is enabled for externally hosted NetherNet ID " + effectiveExternalNetworkId());
         }
 
-        if (config.enabled()) {
-            // Fallback to the gamertag if the host name is empty
-            if (sessionInfo.getHostName().isEmpty()) {
-                sessionInfo.setHostName(sessionManager.getGamertag());
-            }
+        // Fallback to the gamertag if the host name is empty
+        if (sessionInfo.getHostName().isEmpty()) {
+            sessionInfo.setHostName(sessionManager.getGamertag());
+        }
 
-            PingUtil.setWebPingEnabled(config.session().webQueryFallback());
+        PingUtil.setWebPingEnabled(config.session().webQueryFallback());
 
-            // Sync the session info from the server if needed
-            updateSessionInfo(sessionInfo);
+        // Sync the session info from the server if needed
+        updateSessionInfo(sessionInfo);
 
-            try {
-                createSession();
-            } catch (Exception e) {
-                logger.error("Failed to create session", e);
-            }
-        } else {
-            logger.info("Xbox session publishing is disabled in config.yml");
+        try {
+            createSession();
+        } catch (Exception e) {
+            logger.error("Failed to create session", e);
         }
     }
 
     public static void restart() {
-        if (!config.enabled()) {
-            logger.info("Xbox session publishing is disabled in config.yml");
-            return;
-        }
-
         try {
             sessionManager.shutdown();
 
@@ -241,9 +202,7 @@ public class StandaloneMain {
 
         if (config.session().queryServer() && config.session().syncFromGeyser()) {
             try {
-                InetSocketAddress addressToPing = isLocalBridgeEnabled()
-                    ? new InetSocketAddress(config.bridge().backendAddress(), config.bridge().backendPort())
-                    : new InetSocketAddress(sessionInfo.getIp(), sessionInfo.getPort());
+                InetSocketAddress addressToPing = new InetSocketAddress(sessionInfo.getIp(), sessionInfo.getPort());
                 BedrockPong pong = PingUtil.ping(addressToPing, 1500, TimeUnit.MILLISECONDS).get();
 
                 // Update the session information
@@ -251,7 +210,6 @@ public class StandaloneMain {
                 sessionInfo.setWorldName(pong.motd());
                 sessionInfo.setPlayers(pong.playerCount());
                 sessionInfo.setMaxPlayers(pong.maximumPlayerCount());
-                applySessionSettings(sessionInfo);
 
                 // Fallback to the gamertag if the host name is empty
                 if (sessionInfo.getHostName().isEmpty()) {
@@ -265,7 +223,6 @@ public class StandaloneMain {
                     sessionInfo.setWorldName(config.session().sessionInfo().worldName());
                     sessionInfo.setPlayers(config.session().sessionInfo().players());
                     sessionInfo.setMaxPlayers(config.session().sessionInfo().maxPlayers());
-                    applySessionSettings(sessionInfo);
 
                     // Fallback to the gamertag if the host name is empty
                     if (sessionInfo.getHostName().isEmpty()) {
@@ -296,7 +253,6 @@ public class StandaloneMain {
                 sessionInfo.setWorldName(readStatusString(root, "worldName", config.session().sessionInfo().worldName()));
                 sessionInfo.setPlayers(readStatusInt(root, "players", config.session().sessionInfo().players()));
                 sessionInfo.setMaxPlayers(readStatusInt(root, "maxPlayers", config.session().sessionInfo().maxPlayers()));
-                applySessionSettings(sessionInfo);
 
                 // Fallback to the gamertag if the host name is empty
                 if (sessionInfo.getHostName().isEmpty()) {
@@ -325,75 +281,13 @@ public class StandaloneMain {
         return root.get(key).getAsInt();
     }
 
-    private static String orDefault(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
-    }
-
-    private static void applySessionSettings(SessionInfo sessionInfo) {
-        String joinability = config.xboxSession().joinability();
-        sessionInfo.setJoinability(joinability == null || joinability.isBlank()
-            ? "joinable_by_friends"
-            : joinability);
-        sessionInfo.setReadRestriction(orDefault(config.xboxSession().readRestriction(), "followed"));
-        sessionInfo.setJoinRestriction(orDefault(config.xboxSession().joinRestriction(), "followed"));
-        sessionInfo.setWorldType(config.xboxSession().worldType());
-        sessionInfo.setBroadcastSetting(config.xboxSession().broadcastSetting());
-        sessionInfo.setLanGame(config.xboxSession().lanGame());
-        sessionInfo.setEditorWorld(config.xboxSession().editorWorld());
-        sessionInfo.setHardcore(config.xboxSession().hardcore());
+    /**
+     * Tells the session whether Geyser hosts the NetherNet ingress, and on which id. Re-applied whenever
+     * that id is discovered or changes.
+     */
+    private static void applyExternalNetherNet(SessionInfo sessionInfo) {
         sessionInfo.setExternalNetherNetHosted(isExternalNetherNetEnabled());
         sessionInfo.setExternalNetherNetId(effectiveExternalNetworkId());
-        if (isLocalBridgeEnabled()) {
-            sessionInfo.setRelayTargetAddress(config.bridge().backendAddress());
-            sessionInfo.setRelayTargetPort(config.bridge().backendPort());
-            sessionInfo.setPort(config.bridge().listenPort());
-        } else {
-            sessionInfo.setRelayTargetAddress(null);
-            sessionInfo.setRelayTargetPort(0);
-        }
-
-        // No default for an empty host or world name here. Every caller that publishes falls back to
-        // the account's gamertag right after this, and ExpandedSessionInfo supplies "MCXboxBroadcast"
-        // as the last resort; defaulting here first made each of those gamertag fallbacks unreachable.
-        applySubseasonSuffix(sessionInfo);
-    }
-
-    private static void applySubseasonSuffix(SessionInfo sessionInfo) {
-        int subseason = config.netherNet().subseason();
-        if (subseason <= 0) {
-            return;
-        }
-
-        String suffix = " (" + subseason + ")";
-        String hostName = sessionInfo.getHostName();
-        if (hostName != null && !hostName.isBlank() && !hostName.endsWith(suffix)) {
-            sessionInfo.setHostName(hostName + suffix);
-        }
-    }
-
-    private static void logMode() {
-        if (!config.enabled()) {
-            // continueInitialization() says so itself.
-            return;
-        }
-
-        if (isExternalNetherNetEnabled()) {
-            logger.info("Mode: PUBLISH + EXTERNAL NETHERNET");
-            logger.info("Xbox Live session publishing is enabled for externally hosted NetherNet ID " + effectiveExternalNetworkId());
-            return;
-        }
-
-        logger.info("Mode: BRIDGE + PUBLISH");
-        logger.info("Bedrock joins terminate at this proxy and relay to " + config.bridge().backendAddress() + ":" + config.bridge().backendPort());
-        logger.info("Xbox Live session publishing is enabled for the proxy endpoint " + config.session().sessionInfo().ip() + ":" + config.bridge().listenPort());
-    }
-
-    /**
-     * The local bridge relays joins through this process, which needs the session manager's NetherNet
-     * listener - so it only runs while publishing is enabled and Geyser is not hosting the ingress.
-     */
-    private static boolean isLocalBridgeEnabled() {
-        return config.enabled() && !isExternalNetherNetEnabled();
     }
 
     private static boolean isExternalNetherNetEnabled() {
@@ -464,7 +358,7 @@ public class StandaloneMain {
         discoveredExternalNetworkId = found;
         logger.info("Updated external NetherNet ID from local Geyser: " + found);
         if (sessionInfo != null) {
-            applySessionSettings(sessionInfo);
+            applyExternalNetherNet(sessionInfo);
         }
     }
 

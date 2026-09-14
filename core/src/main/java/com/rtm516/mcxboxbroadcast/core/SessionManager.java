@@ -87,6 +87,8 @@ public class SessionManager extends SessionManagerCore {
         final Map<String, String> nonces;
         /** Xuid -> gamertag as of the last read, or null before the first; for arrival and departure logs. */
         Map<String, String> members;
+        /** Xuid -> when a player was seen arriving here; see SessionManager#memberSince. */
+        final Map<String, Instant> memberSince = new HashMap<>();
         final Instant retiredAt = Instant.now();
 
         RetiredSession(String id, Map<String, String> nonces) {
@@ -105,6 +107,14 @@ public class SessionManager extends SessionManagerCore {
      * access goes through the synchronized logMemberChanges().
      */
     private Map<String, String> knownMembers;
+
+    /**
+     * Xuid -> when a player was seen arriving in the current session, for the time shown when they
+     * leave. A stay of a few seconds is a join that failed: the client entered the session, then gave
+     * up before or while connecting. Players already present in the first snapshot have no entry.
+     * Guarded like knownMembers.
+     */
+    private final Map<String, Instant> memberSince = new HashMap<>();
 
     /**
      * Create an instance of SessionManager
@@ -379,17 +389,22 @@ public class SessionManager extends SessionManagerCore {
 
         if (knownMembers == null) {
             knownMembers = current;
+            memberSince.clear();
             return;
         }
 
         for (Map.Entry<String, String> entry : current.entrySet()) {
             if (!knownMembers.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
+                memberSince.put(entry.getKey(), Instant.now());
                 logger.info(entry.getValue() + " joined the Xbox session (" + current.size() + " members)");
             }
         }
         for (Map.Entry<String, String> entry : knownMembers.entrySet()) {
-            if (!current.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
-                logger.info(entry.getValue() + " is no longer in the Xbox session (" + current.size() + " members)");
+            if (!current.containsKey(entry.getKey())) {
+                Instant since = memberSince.remove(entry.getKey());
+                if (!isOwnAccount(entry.getKey())) {
+                    logger.info(entry.getValue() + " is no longer in the Xbox session" + stayed(since) + " (" + current.size() + " members)");
+                }
             }
         }
 
@@ -703,12 +718,16 @@ public class SessionManager extends SessionManagerCore {
                 if (retired.members != null) {
                     for (Map.Entry<String, String> entry : members.entrySet()) {
                         if (!retired.members.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
+                            retired.memberSince.put(entry.getKey(), Instant.now());
                             logger.info(entry.getValue() + " joined the previous Xbox session (" + members.size() + " members)");
                         }
                     }
                     for (Map.Entry<String, String> entry : retired.members.entrySet()) {
-                        if (!members.containsKey(entry.getKey()) && !isOwnAccount(entry.getKey())) {
-                            logger.info(entry.getValue() + " is no longer in the previous Xbox session (" + members.size() + " members)");
+                        if (!members.containsKey(entry.getKey())) {
+                            Instant since = retired.memberSince.remove(entry.getKey());
+                            if (!isOwnAccount(entry.getKey())) {
+                                logger.info(entry.getValue() + " is no longer in the previous Xbox session" + stayed(since) + " (" + members.size() + " members)");
+                            }
                         }
                     }
                 }
@@ -806,6 +825,15 @@ public class SessionManager extends SessionManagerCore {
         } catch (SessionUpdateException e) {
             logger.debug("Could not leave the previous Xbox session: " + e.getMessage());
         }
+    }
+
+    /** " after 4s" or " after 12 min" since a player arrived, or nothing when the arrival was not seen. */
+    private static String stayed(Instant since) {
+        if (since == null) {
+            return "";
+        }
+        long seconds = Math.max(0, Duration.between(since, Instant.now()).getSeconds());
+        return seconds < 60 ? " after " + seconds + "s" : " after " + (seconds / 60) + " min";
     }
 
     /** A fresh join nonce: eight random bytes as sixteen hex digits, the format updateNonces() issues. */

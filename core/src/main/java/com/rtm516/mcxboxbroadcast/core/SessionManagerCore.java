@@ -13,24 +13,16 @@ import com.rtm516.mcxboxbroadcast.core.models.session.SocialSummaryResponse;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
 import com.rtm516.mcxboxbroadcast.core.nethernet.BroadcasterChannelInitializer;
-import com.rtm516.mcxboxbroadcast.core.nethernet.bridge.BridgeClientSession;
 import dev.kastle.netty.channel.nethernet.NetherNetChannelFactory;
 import dev.kastle.netty.channel.nethernet.config.NetherChannelOption;
 import dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling;
 import dev.kastle.webrtc.PeerConnectionFactory;
 import dev.kastle.webrtc.PortAllocatorConfig;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import net.raphimc.minecraftauth.bedrock.BedrockAuthManager;
-import org.cloudburstmc.netty.channel.raknet.RakChannelFactory;
-import org.cloudburstmc.netty.channel.raknet.config.RakChannelOption;
-import org.cloudburstmc.protocol.bedrock.BedrockPeer;
-import org.cloudburstmc.protocol.bedrock.netty.initializer.BedrockChannelInitializer;
 
 import java.io.File;
 import java.io.IOException;
@@ -40,13 +32,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Consumer;
 
 /**
  * Simple manager to authenticate and create sessions on Xbox
@@ -71,7 +60,6 @@ public abstract class SessionManagerCore {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private NetherNetXboxRpcSignaling signaling;
-    private final Set<Channel> bridgeClientChannels = ConcurrentHashMap.newKeySet();
 
     private PortAllocatorConfig netherNetPortAllocatorConfig;
 
@@ -613,7 +601,7 @@ public abstract class SessionManagerCore {
             ServerBootstrap b = new ServerBootstrap();
             b.group(bossGroup, workerGroup)
                 .channelFactory(NetherNetChannelFactory.server(new PeerConnectionFactory(), signaling))
-                .childHandler(new BroadcasterChannelInitializer(this, logger));
+                .childHandler(new BroadcasterChannelInitializer(sessionInfo, this, logger));
 
             PortAllocatorConfig portAllocatorConfig = netherNetPortAllocatorConfig();
             if (portAllocatorConfig != null) {
@@ -631,49 +619,6 @@ public abstract class SessionManagerCore {
         }
     }
 
-    public void newBridgeClient(Consumer<BridgeClientSession> sessionConsumer) {
-        if (this.workerGroup == null) {
-            throw new IllegalStateException("NetherNet worker group is not initialized");
-        }
-
-        String host = sessionInfo.getRelayTargetAddress() != null && !sessionInfo.getRelayTargetAddress().isBlank()
-            ? sessionInfo.getRelayTargetAddress()
-            : sessionInfo.getIp();
-        int port = sessionInfo.getRelayTargetPort() > 0
-            ? sessionInfo.getRelayTargetPort()
-            : sessionInfo.getPort();
-
-        // Not awaited: this runs on a NetherNet peer's event loop, and the new channel can land on
-        // that same loop, where blocking on its connect would throw instead of waiting.
-        ChannelFuture connectFuture = new Bootstrap()
-            .group(this.workerGroup)
-            .channelFactory(RakChannelFactory.client(NioDatagramChannel.class))
-            .option(RakChannelOption.RAK_PROTOCOL_VERSION, Constants.BEDROCK_CODEC.getRaknetProtocolVersion())
-            .handler(new BedrockChannelInitializer<BridgeClientSession>() {
-                @Override
-                protected BridgeClientSession createSession0(BedrockPeer peer, int subClientId) {
-                    return new BridgeClientSession(peer, subClientId);
-                }
-
-                @Override
-                protected void initSession(BridgeClientSession session) {
-                    sessionConsumer.accept(session);
-                }
-            })
-            .connect(new InetSocketAddress(host, port));
-        connectFuture.addListener(future -> {
-            if (!future.isSuccess()) {
-                logger.warn("Could not connect the bridge to " + host + ":" + port + ": " + future.cause());
-            }
-        });
-
-        Channel channel = connectFuture.channel();
-        this.bridgeClientChannels.add(channel);
-        // Drop it again when it closes. Without this the set only ever grew: one dead Channel kept
-        // alive per player who has ever joined through the local bridge, until the process stops.
-        channel.closeFuture().addListener(future -> this.bridgeClientChannels.remove(channel));
-    }
-
     /**
      * Stop the current session and close the websocket
      */
@@ -688,10 +633,6 @@ public abstract class SessionManagerCore {
     }
 
     private void shutdownNetherNet() {
-        for (Channel bridgeClientChannel : bridgeClientChannels) {
-            bridgeClientChannel.close();
-        }
-        bridgeClientChannels.clear();
         if (netherNetChannel != null) {
             netherNetChannel.close();
             netherNetChannel = null;

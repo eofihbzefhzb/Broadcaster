@@ -10,18 +10,8 @@ import org.spongepowered.configurate.objectmapping.meta.Comment;
 
 @ConfigSerializable
 public interface CoreConfig {
-    @Comment("Whether to publish the Xbox session. When off, nothing is published and the local bridge does not start")
-    @DefaultBoolean(true)
-    boolean enabled();
-
     @Comment("Core session settings")
     SessionConfig session();
-
-    @Comment("Xbox session behaviour")
-    XboxSessionConfig xboxSession();
-
-    @Comment("Standalone plain-Bedrock proxy bridge settings")
-    BridgeConfig bridge();
 
     @Comment("Advanced NetherNet publishing settings")
     NetherNetConfig netherNet();
@@ -147,107 +137,6 @@ public interface CoreConfig {
     }
 
     @ConfigSerializable
-    interface XboxSessionConfig {
-        @Comment("""
-            Minecraft's own joinability label for the session. It has exactly two valid values:
-            "joinable_by_friends" and "invite_only". Anything else is not a member of the
-            enumeration - the client reads it, fails to interpret it, and silently gives up right
-            after the resource-pack step, leaving the player on "searching for a game session".
-            In particular "joinable_by_friends_of_friends" does not exist; it was tested twice, on
-            both the shared-session and one-session-per-account layouts, and failed identically.
-
-            The three-way "Player access" control in the Minecraft UI is misleading here, because
-            the setting it moves is broadcast-setting, not this field. The three buttons write
-            these triples, and note that the two rightmost share one joinability string:
-
-              Invite only         invite_only          joinRestriction=local      broadcast=1
-              Friends             joinable_by_friends  joinRestriction=followed   broadcast=2
-              Friends of friends  joinable_by_friends  joinRestriction=followed   broadcast=3
-
-            So friends-of-friends is broadcast-setting 3 with this field left on
-            "joinable_by_friends". Setting it here instead is what produced the outage above.
-            Treat the three fields as one triple rather than as independent switches.
-            This does NOT control who can see the session - see read-restriction below for that.""")
-        @DefaultString("joinable_by_friends")
-        String joinability();
-
-        @Comment("""
-            Xbox MPSD system-level restriction on who may READ (see) the session.
-            Leave this on "followed". "none" is rejected by Xbox with HTTP 400:
-              Invalid session 'readRestriction' provided, cannot be set to none on sessions
-              with the 'userAuthorizationStyle' capability.
-            Minecraft's session template carries that capability, so the session fails to publish
-            entirely. Exposed here only so the value is visible rather than hardcoded.""")
-        @DefaultString("followed")
-        String readRestriction();
-
-        @Comment("""
-            Xbox MPSD system-level restriction on who may JOIN the session.
-            Same as read-restriction above: "none" is rejected with the same HTTP 400. Leave on
-            "followed". Widening reach is done through the accounts' friends lists, not here.""")
-        @DefaultString("followed")
-        String joinRestriction();
-
-        @Comment("""
-            Minecraft's numeric visibility setting for the session, sent as BroadcastSetting.
-            3 = friends of friends (the value Minecraft itself publishes, and the default here),
-            2 = friends only, 1 = invite only, 4 = public.
-            Xbox applies read-restriction before the client ever reads this, so no value here
-            reaches anyone the "followed" gate has already excluded.""")
-        @DefaultNumeric(3)
-        @NumericRange(from = 0, to = 4)
-        int broadcastSetting();
-
-        @Comment("""
-            Whether the session announces itself as a LAN game, sent as LanGame.
-            This is the one visibility field the upstream NetherNet rewrite changed: builds up to
-            49 published true, build 50 switched it to false when it moved the session from RakNet
-            to WebRTC. What the client does with it has not been isolated - sessions published with
-            false still appeared - so true is kept only because it matches the builds that are known
-            to have worked. It does not select the transport; TransportLayer does.
-            Leave it true unless you are deliberately testing the build 50 behaviour.""")
-        @DefaultBoolean(true)
-        boolean lanGame();
-
-        @Comment("The world type shown in the Xbox session")
-        @DefaultString("Survival")
-        String worldType();
-
-        @Comment("Whether the session should show as a hardcore world")
-        @DefaultBoolean(false)
-        boolean hardcore();
-
-        @Comment("Whether the session should show as an editor world")
-        @DefaultBoolean(false)
-        boolean editorWorld();
-    }
-
-    @ConfigSerializable
-    interface BridgeConfig {
-        @Comment("""
-            Standalone Bedrock bridge settings.
-            The bridge starts automatically while publishing is enabled and nether-net.external-hosted is false.
-
-            The local address to bind the proxy listener to""")
-        @DefaultString("0.0.0.0")
-        String listenAddress();
-
-        @Comment("The local port to bind the proxy listener to")
-        @DefaultNumeric(19132)
-        @NumericRange(from = 1, to = 65535)
-        int listenPort();
-
-        @Comment("The plain Bedrock backend host that the proxy should relay into")
-        @DefaultString("127.0.0.1")
-        String backendAddress();
-
-        @Comment("The plain Bedrock backend port that the proxy should relay into")
-        @DefaultNumeric(19133)
-        @NumericRange(from = 1, to = 65535)
-        int backendPort();
-    }
-
-    @ConfigSerializable
     interface NetherNetConfig {
         @Comment("""
             Publish an externally hosted NetherNet session instead of binding MCXboxBroadcast's own NetherNet gameplay listener.
@@ -268,15 +157,6 @@ public interface CoreConfig {
             Example: C:\\path\\to\\Velocity\\plugins\\Geyser-Velocity\\portal-session-status.json""")
         @DefaultString("")
         String statusFilePath();
-
-        @Comment("""
-            Optional label for running several broadcaster instances against separate backends.
-            When set above 0 the advertised secondary MOTD (host-name) gets " (<subseason>)" appended
-            so each instance's Xbox session is distinguishable in the friends list.
-            Leave at 0 for a normal single-server setup.""")
-        @DefaultNumeric(0)
-        @NumericRange(from = 0, to = Integer.MAX_VALUE)
-        int subseason();
 
         @Comment("""
             How long standalone mode should wait for the local Geyser portal bridge to publish its
@@ -315,12 +195,11 @@ public interface CoreConfig {
         interface ExpiryConfig {
             @Comment("""
                 Should we unfriend people that haven't joined the server in a while.
-                Leave this off. Upstream records a friend's last visit when they connect through
-                the Broadcaster's own RedirectPacketHandler; with the NetherNet transport players
-                connect to Geyser instead, that handler no longer exists, and nothing refreshes the
-                record after it is first written. Turned on, this would unfriend every friend
-                'days' after they were first seen - daily players included - and take the server
-                out of all of their friends lists.""")
+                Leave this off with nether-net.external-hosted. A friend's last visit is only recorded
+                when this process's own NetherNet listener transfers them; players who join through
+                Geyser never pass through it, so nothing refreshes the record after it is first
+                written. Turned on, this would unfriend every friend 'days' after they were first
+                seen - daily players included - and take the server out of all of their friends lists.""")
             @DefaultBoolean(false)
             boolean enabled();
 

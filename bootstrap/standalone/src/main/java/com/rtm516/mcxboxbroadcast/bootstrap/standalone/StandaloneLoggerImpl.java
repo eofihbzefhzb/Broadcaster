@@ -81,18 +81,10 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                 case "stop", "exit" -> System.exit(0);
                 case "restart" -> StandaloneMain.restart();
                 case "dumpsession" -> {
-                    if (StandaloneMain.sessionManager == null) {
-                        warn("Session publishing is disabled.");
-                        return;
-                    }
                     info("Dumping session responses to 'lastSessionResponse.json' and 'currentSessionResponse.json'");
                     StandaloneMain.sessionManager.dumpSession();
                 }
                 case "accounts" -> {
-                    if (StandaloneMain.sessionManager == null) {
-                        warn("Session publishing is disabled.");
-                        return;
-                    }
                     if (args.length == 0) {
                         warn("Usage:");
                         warn("accounts list");

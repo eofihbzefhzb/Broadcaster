@@ -33,7 +33,7 @@ public class ExpandedSessionInfo extends SessionInfo {
         setMaxPlayers(sessionInfo.getMaxPlayers());
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
-        copyPublishingSettings(sessionInfo);
+        copyExternalNetherNet(sessionInfo);
     }
 
     public void updateSessionInfo(SessionInfo sessionInfo) {
@@ -43,25 +43,15 @@ public class ExpandedSessionInfo extends SessionInfo {
         setMaxPlayers(sessionInfo.getMaxPlayers());
         setIp(sessionInfo.getIp());
         setPort(sessionInfo.getPort());
-        copyPublishingSettings(sessionInfo);
+        copyExternalNetherNet(sessionInfo);
     }
 
     /**
-     * Copies the configured Xbox session settings and, in external-hosted mode, adopts the NetherNet
-     * id Geyser listens on. netherNetId is what the session advertises under SupportedConnections, so
-     * it has to follow an id discovered at runtime too, not only the one known at construction.
+     * In external-hosted mode, adopts the NetherNet id Geyser listens on. netherNetId is what the
+     * session advertises under SupportedConnections, so it has to follow an id discovered at runtime
+     * too, not only the one known at construction.
      */
-    private void copyPublishingSettings(SessionInfo sessionInfo) {
-        setJoinability(sessionInfo.getJoinability());
-        setReadRestriction(sessionInfo.getReadRestriction());
-        setJoinRestriction(sessionInfo.getJoinRestriction());
-        setWorldType(sessionInfo.getWorldType());
-        setBroadcastSetting(sessionInfo.getBroadcastSetting());
-        setLanGame(sessionInfo.isLanGame());
-        setEditorWorld(sessionInfo.isEditorWorld());
-        setHardcore(sessionInfo.isHardcore());
-        setRelayTargetAddress(sessionInfo.getRelayTargetAddress());
-        setRelayTargetPort(sessionInfo.getRelayTargetPort());
+    private void copyExternalNetherNet(SessionInfo sessionInfo) {
         setExternalNetherNetHosted(sessionInfo.isExternalNetherNetHosted());
         setExternalNetherNetId(sessionInfo.getExternalNetherNetId());
 
