@@ -191,8 +191,9 @@ public interface CoreConfig {
                 Should we unfriend people that haven't joined the server in a while.
                 Leave this off. Upstream records a friend's last visit when its own NetherNet listener
                 transfers them; this fork never starts that listener - players join through Geyser -
-                so nothing refreshes the record after it is first written. Turned on, this would unfriend every friend 'days' after they were first
-                seen - daily players included - and take the server out of all of their friends lists.""")
+                so nothing refreshes the record after it is first written. Turned on, this would
+                unfriend every friend 'days' after they were first seen - daily players included -
+                and take the server out of all of their friends lists.""")
             @DefaultBoolean(false)
             boolean enabled();
 
