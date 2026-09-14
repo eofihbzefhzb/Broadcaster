@@ -121,9 +121,8 @@ public interface CoreConfig {
     @ConfigSerializable
     interface NetherNetConfig {
         @Comment("""
-            The externally hosted NetherNet network id to advertise in the Xbox session.
-            This must match the listener that accepts the NetherNet/WebRTC join.
-            Leave empty to auto-discover it.""")
+            The NetherNet network id of Geyser's portal bridge, advertised in the Xbox session.
+            Leave empty to read it from Geyser's portal-session-status.json.""")
         @DefaultString("")
         String externalNetworkId();
 
@@ -135,9 +134,9 @@ public interface CoreConfig {
         String statusFilePath();
 
         @Comment("""
-            How long standalone mode should wait for the local Geyser portal bridge to publish its
-            automatically generated NetherNet ID when external-network-id is empty. MCXboxBroadcast
-            can start first as long as Geyser is ready within this time; otherwise it exits.""")
+            How long to wait at startup for Geyser's portal bridge to publish its NetherNet ID when
+            external-network-id is empty. MCXboxBroadcast can start first as long as Geyser is ready
+            within this time; otherwise it exits.""")
         @DefaultNumeric(120)
         @NumericRange(from = 0, to = Integer.MAX_VALUE)
         int discoveryTimeoutSeconds();
