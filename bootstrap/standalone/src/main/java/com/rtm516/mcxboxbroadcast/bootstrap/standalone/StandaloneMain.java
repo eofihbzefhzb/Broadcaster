@@ -187,7 +187,6 @@ public class StandaloneMain {
     private static boolean updateSessionInfo(SessionInfo sessionInfo) {
         refreshExternalNetworkId();
         if (config.netherNet().externalNetworkId().isBlank() && !hasReadyExternalNetworkStatus()) {
-
             logger.warn("Geyser NetherNet status is not ready; keeping the Xbox session unchanged until Geyser is ready.");
             return false;
         }
