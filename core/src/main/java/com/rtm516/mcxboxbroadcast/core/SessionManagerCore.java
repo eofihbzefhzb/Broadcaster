@@ -258,7 +258,6 @@ public abstract class SessionManagerCore {
             if (this.sessionInfo.getPmsgId() == null || this.sessionInfo.getPmsgId().isBlank()) {
                 throw new SessionCreationException("No PmsgId in the Minecraft session token.");
             }
-            logger.info("Advertising Geyser's NetherNet ID: " + this.sessionInfo.getNetherNetId());
         }
 
         // Set the showcase image to the current screenshot

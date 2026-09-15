@@ -259,6 +259,17 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
+     * Logs the NetherNet id once the session carrying it is published. Here rather than in the base
+     * class: sub-accounts go through the same createSession() but only join this session, and never
+     * send the id themselves.
+     */
+    @Override
+    protected void createSession() throws SessionCreationException, SessionUpdateException {
+        super.createSession();
+        logger.info("Advertising Geyser's NetherNet ID: " + this.sessionInfo.getNetherNetId());
+    }
+
+    /**
      * Update the current session with new information
      *
      * @param sessionInfo The information to update the session with
