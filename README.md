@@ -196,5 +196,5 @@ If a join fails, classify the last stage that was logged:
 
 `MCXboxBroadcastStandalone.jar` is the only jar this fork builds, published at
 https://github.com/eofihbzefhzb/Broadcaster/releases/latest. The Geyser extension form was
-removed because Geyser's own NetherNet ingress owns the gameplay connection, leaving this
+removed because the Geyser fork's NetherNet ingress owns the gameplay connection, leaving this
 process responsible only for publishing the Xbox session.
