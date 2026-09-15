@@ -46,10 +46,10 @@ The two processes run on the same machine and share two files:
 - The session advertises the portal bridge's NetherNet ID: `nether-net.external-network-id`, or
   when that is empty, the ID in Geyser's `portal-session-status.json`. Nothing is published
   without one.
-- At startup the Xbox sign-in is refreshed first, including the Minecraft token Geyser uses, then
-  the publisher waits up to `discovery-timeout-seconds` for Geyser. After that it follows a
-  change of ID, and leaves the session unchanged while Geyser's status file is not ready or is
-  more than 3 minutes old.
+- At startup the Xbox sign-in is refreshed first, including the Minecraft token Geyser uses. With
+  `external-network-id` empty, the publisher then waits up to `discovery-timeout-seconds` for
+  Geyser, follows any later change of ID, and leaves the session unchanged while Geyser's status
+  file is not ready or is more than 3 minutes old.
 - With `session.sync-from-geyser` on (the default), the host name, world name and player counts
   come from that status file. Without the file, they come from a ping to `session-info` when
   `query-server` is on.
@@ -90,6 +90,8 @@ The two processes run on the same machine and share two files:
   `MCXboxBroadcastStandalone.jar` is the only artifact.
 - Releases are numbered GitHub builds whose notes list the commits since the previous build.
   Upstream's Pterodactyl egg and Docker image are not published.
+- `.gitignore` covers the publisher's runtime files (`cache/`, `logs/`, `config.yml`), so
+  `cache.json` cannot be committed by accident.
 
 ## Setup
 
